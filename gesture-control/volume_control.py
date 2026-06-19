@@ -49,7 +49,10 @@ class VolumeController:
 
     def __init__(self) -> None:
         self.available: bool = _PYCAW_OK
-        # Simulated level used by the media-key fallback.
+        # Simulated level used by the media-key fallback.  Must be set
+        # BEFORE current_level() is called, otherwise the fallback path
+        # reads this attribute before it exists.
+        self._sim_level: float = 0.5
         self._sim_level: float = self.current_level()
         self._last_press: float = 0.0
 
