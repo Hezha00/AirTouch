@@ -15,11 +15,11 @@ Keys:
 from __future__ import annotations
 
 import argparse
+import importlib
 import sys
 import time
 
 import cv2
-import mediapipe as mp
 import numpy as np
 import pyautogui
 
@@ -51,6 +51,92 @@ def configure_pyautogui(cfg: Config) -> None:
 
 
 # --------------------------------------------------------------------------- #
+#  Robust MediaPipe loader
+# --------------------------------------------------------------------------- #
+#  Newer MediaPipe builds (and some wheels on Python 3.11/3.12) do NOT
+#  auto-populate `mp.solutions` when you `import mediapipe`.  We therefore
+#  force-import the submodules explicitly and return the Hands class.
+# --------------------------------------------------------------------------- #
+def load_mediapipe_hands():
+    """
+    Return the MediaPipe ``Hands`` solution class in a version-robust way.
+
+    Tries, in order:
+      1. ``mediapipe.solutions.hands.Hands``  (after explicit submodule import)
+      2. ``mediapipe.python.solutions.hands.Hands``
+      3. Direct ``from mediapipe.solutions.hands import Hands``
+
+    Raises a clear RuntimeError with an actionable message if all fail.
+    """
+    last_err: Exception | None = None
+
+    # Strategy 1 + 3: force the submodules to load.
+    try:
+        importlib.import_module("mediapipe")
+        sol = importlib.import_module("mediapipe.solutions")
+        hands_mod = importlib.import_module("mediapipe.solutions.hands")
+        if hasattr(hands_mod, "Hands"):
+            return hands_mod.Hands, getattr(hands_mod, "HAND_CONNECTIONS", None)
+    except Exception as e:  # pragma: no cover - environment dependent
+        last_err = e
+
+    # Strategy 2: the python.solutions path used by some builds.
+    try:
+        hands_mod = importlib.import_module("mediapipe.python.solutions.hands")
+        if hasattr(hands_mod, "Hands"):
+            return hands_mod.Hands, getattr(hands_mod, "HAND_CONNECTIONS", None)
+    except Exception as e:
+        last_err = e
+
+    # Nothing worked.
+    import mediapipe as mp
+    raise RuntimeError(
+        "Could not load MediaPipe Hands solution. "
+        f"(last error: {last_err})\n"
+        "mediapipe version: " + getattr(mp, "__version__", "unknown") + "\n"
+        "Fixes to try:\n"
+        "  1. pip install --upgrade --force-reinstall mediapipe\n"
+        "  2. pip install 'mediapipe<0.11'\n"
+        "  3. Use Python 3.10 or 3.11 (mediapipe has no wheels for 3.12+ yet)."
+    )
+
+
+# --------------------------------------------------------------------------- #
+#  Open camera
+# --------------------------------------------------------------------------- #
+def open_camera(cfg: Config) -> cv2.VideoCapture:
+    cap = cv2.VideoCapture(cfg.CAMERA_INDEX, cv2.CAP_DSHOW)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, cfg.CAM_WIDTH)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cfg.CAM_HEIGHT)
+    cap.set(cv2.CAP_PROP_FPS, cfg.CAM_FPS)
+    if not cap.isOpened():
+        # Fallback: try without CAP_DSHOW (some setups dislike it).
+        cap = cv2.VideoCapture(cfg.CAMERA_INDEX)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, cfg.CAM_WIDTH)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cfg.CAM_HEIGHT)
+    return cap
+
+
+# --------------------------------------------------------------------------- #
+#  Helper: draw a centred banner message on the frame
+# --------------------------------------------------------------------------- #
+def draw_banner(frame: np.ndarray, text: str, sub: str = "",
+                color=(0, 0, 255)) -> None:
+    h, w = frame.shape[:2]
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (0, h // 2 - 60), (w, h // 2 + 60), (0, 0, 0), -1)
+    cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
+    cv2.rectangle(frame, (0, h // 2 - 60), (w, h // 2 + 60), color, 1)
+
+    cv2.putText(frame, text, (w // 2 - 4 * len(text), h // 2 - 10),
+                cv2.FONT_HERSHEY_DUPLEX, 0.8, color, 1, cv2.LINE_AA)
+    if sub:
+        cv2.putText(frame, sub, (w // 2 - 4 * len(sub), h // 2 + 25),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (220, 220, 220),
+                    1, cv2.LINE_AA)
+
+
+# --------------------------------------------------------------------------- #
 #  Main loop
 # --------------------------------------------------------------------------- #
 def run(cfg: Config) -> None:
@@ -64,25 +150,34 @@ def run(cfg: Config) -> None:
     print(f"[init] volume backend    : {volume.status_label()}")
     print(f"[init] camera            : index {cfg.CAMERA_INDEX}, "
           f"{cfg.CAM_WIDTH}x{cfg.CAM_HEIGHT}@{cfg.CAM_FPS}fps")
-    print("[init] press H for help, Q / ESC to quit.\n")
 
-    cap = cv2.VideoCapture(cfg.CAMERA_INDEX, cv2.CAP_DSHOW)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, cfg.CAM_WIDTH)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cfg.CAM_HEIGHT)
-    cap.set(cv2.CAP_PROP_FPS, cfg.CAM_FPS)
-
+    # ---- open camera FIRST so a window always appears ------------------- #
+    cap = open_camera(cfg)
     if not cap.isOpened():
         print("[error] could not open the webcam. "
               "Check the camera index or that it is not in use.")
         sys.exit(1)
+    print("[init] camera opened.")
 
-    mp_hands = mp.solutions.hands
-    hands = mp_hands.Hands(
-        static_image_mode=False,
-        max_num_hands=cfg.MAX_NUM_HANDS,
-        min_detection_confidence=cfg.MIN_DETECTION_CONFIDENCE,
-        min_tracking_confidence=cfg.MIN_TRACKING_CONFIDENCE,
-    )
+    # ---- try to load MediaPipe Hands ------------------------------------ #
+    hands = None
+    mp_error: str | None = None
+    try:
+        HandsCls, _connections = load_mediapipe_hands()
+        hands = HandsCls(
+            static_image_mode=False,
+            max_num_hands=cfg.MAX_NUM_HANDS,
+            min_detection_confidence=cfg.MIN_DETECTION_CONFIDENCE,
+            min_tracking_confidence=cfg.MIN_TRACKING_CONFIDENCE,
+        )
+        print("[init] MediaPipe Hands loaded successfully.")
+    except Exception as e:
+        mp_error = str(e)
+        print("[warn] MediaPipe Hands could not be loaded:")
+        print("       " + mp_error)
+        print("[warn] The camera window will still open (hand tracking disabled).")
+
+    print("[init] press H for help, Q / ESC to quit.\n")
 
     help_on = False
     prev_t = time.time()
@@ -94,69 +189,80 @@ def run(cfg: Config) -> None:
         while True:
             ok, frame = cap.read()
             if not ok:
-                print("[warn] empty frame grabbed, retrying...")
+                # Show a placeholder frame so the window never disappears.
+                frame = np.zeros((cfg.CAM_HEIGHT, cfg.CAM_WIDTH, 3), dtype=np.uint8)
+                draw_banner(frame, "NO CAMERA FRAME",
+                            "check that the webcam is connected")
+                cv2.imshow(cfg.WINDOW_NAME, frame)
+                if (cv2.waitKey(30) & 0xFF) in (ord("q"), 27):
+                    break
                 continue
 
             # 1. mirror for a natural "selfie" feel
             frame = cv2.flip(frame, 1)
 
-            # 2. MediaPipe expects RGB
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            rgb.flags.writeable = False
-            results = hands.process(rgb)
-            rgb.flags.writeable = True
-
             gesture = G_IDLE
-            cursor_pos: tuple[int, int] | None = None
             pinch_l = pinch_r = 1.0
 
-            if results.multi_hand_landmarks:
-                hand_lm = results.multi_hand_landmarks[0]
-                lm = Landmarks(pts=[(p.x, p.y) for p in hand_lm.landmark])
+            if hands is not None:
+                # 2. MediaPipe expects RGB
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                rgb.flags.writeable = False
+                results = hands.process(rgb)
+                rgb.flags.writeable = True
 
-                res = engine.detect(lm)
-                gesture = res.name
-                pinch_l, pinch_r = res.pinch_ratio_l, res.pinch_ratio_r
+                if results.multi_hand_landmarks:
+                    hand_lm = results.multi_hand_landmarks[0]
+                    lm = Landmarks(pts=[(p.x, p.y) for p in hand_lm.landmark])
 
-                # ---- act on the gesture ------------------------------- #
-                if res.cursor_target is not None:
-                    if gesture == G_MOVE:
-                        sx, sy = cursor.update(*res.cursor_target)
-                        cursor.move_to(sx, sy)
-                        last_cursor = (int(sx), int(sy))
-                    # Keep the EMA target fresh even outside MOVE so the
-                    # cursor doesn't snap when re-entering MOVE mode, but
-                    # do NOT physically move it.
-                    elif gesture in (G_LCLICK, G_RCLICK):
-                        cursor.update(*res.cursor_target)
+                    res = engine.detect(lm)
+                    gesture = res.name
+                    pinch_l, pinch_r = res.pinch_ratio_l, res.pinch_ratio_r
 
-                if gesture == G_LCLICK:
-                    pyautogui.click(button="left")
-                elif gesture == G_RCLICK:
-                    pyautogui.click(button="right")
-                elif gesture == G_SCROLL and res.scroll_delta != 0.0:
-                    # hand up (delta<0) -> scroll up (+), hand down -> down (-)
-                    ticks = cfg.SCROLL_TICKS
-                    pyautogui.scroll(-ticks if res.scroll_delta > 0 else ticks)
-                elif gesture == G_VOLUME and res.volume_level is not None:
-                    volume.set_level(res.volume_level)
-                    active_volume_pct = res.volume_level * 100.0
+                    # ---- act on the gesture --------------------------- #
+                    if res.cursor_target is not None:
+                        if gesture == G_MOVE:
+                            sx, sy = cursor.update(*res.cursor_target)
+                            cursor.move_to(sx, sy)
+                            last_cursor = (int(sx), int(sy))
+                        elif gesture in (G_LCLICK, G_RCLICK):
+                            cursor.update(*res.cursor_target)
+
+                    if gesture == G_LCLICK:
+                        pyautogui.click(button="left")
+                    elif gesture == G_RCLICK:
+                        pyautogui.click(button="right")
+                    elif gesture == G_SCROLL and res.scroll_delta != 0.0:
+                        ticks = cfg.SCROLL_TICKS
+                        pyautogui.scroll(-ticks if res.scroll_delta > 0 else ticks)
+                    elif gesture == G_VOLUME and res.volume_level is not None:
+                        volume.set_level(res.volume_level)
+                        active_volume_pct = res.volume_level * 100.0
+                    else:
+                        if gesture != G_VOLUME:
+                            active_volume_pct = None
+
+                    # ---- visual skeleton + pinch meters --------------- #
+                    draw_landmarks(frame, hand_lm, cfg)
+                    h, w = frame.shape[:2]
+                    ix, iy = int(lm.x(8) * w), int(lm.y(8) * h)
+                    draw_pinch_meter(frame, ix, iy, pinch_l,
+                                     cfg.PINCH_THRESHOLD, cfg)
+                    mx, my = int(lm.x(12) * w), int(lm.y(12) * h)
+                    draw_pinch_meter(frame, mx, my, pinch_r,
+                                     cfg.PINCH_THRESHOLD, cfg)
                 else:
-                    if gesture != G_VOLUME:
-                        active_volume_pct = None
-
-                # ---- visual skeleton + pinch meters ------------------- #
-                draw_landmarks(frame, hand_lm, cfg)
-                h, w = frame.shape[:2]
-                ix, iy = int(lm.x(8) * w), int(lm.y(8) * h)
-                draw_pinch_meter(frame, ix, iy, pinch_l, cfg.PINCH_THRESHOLD, cfg)
-                mx, my = int(lm.x(12) * w), int(lm.y(12) * h)
-                draw_pinch_meter(frame, mx, my, pinch_r, cfg.PINCH_THRESHOLD, cfg)
+                    engine.reset()
+                    cursor.reset()
+                    active_volume_pct = None
             else:
-                # hand lost -> reset transient state
-                engine.reset()
-                cursor.reset()
-                active_volume_pct = None
+                # MediaPipe unavailable -> just show the live feed + warning.
+                draw_banner(
+                    frame,
+                    "HAND TRACKING DISABLED",
+                    "MediaPipe failed to load - see terminal",
+                    color=(0, 140, 255),
+                )
 
             # 3. FPS (EMA-smoothed)
             now = time.time()
@@ -166,7 +272,6 @@ def run(cfg: Config) -> None:
 
             # 4. HUD
             if last_cursor is None:
-                # fall back to the real cursor if we never moved it
                 px, py = pyautogui.position()
                 last_cursor = (px, py)
             draw_bounding_box(frame, cfg)
@@ -191,7 +296,11 @@ def run(cfg: Config) -> None:
     except KeyboardInterrupt:
         pass
     finally:
-        hands.close()
+        if hands is not None:
+            try:
+                hands.close()
+            except Exception:
+                pass
         cap.release()
         cv2.destroyAllWindows()
         print("\n[exit] gesture control stopped. bye!")
