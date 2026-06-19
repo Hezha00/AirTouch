@@ -1,0 +1,10 @@
+# Core computer-vision + control stack
+opencv-python>=4.8.0
+mediapipe>=0.10.9
+pyautogui>=0.9.54
+numpy>=1.24.0
+
+# Fine-grained Windows master-volume control (optional but recommended).
+# Automatically degrades to media-key presses if unavailable.
+pycaw>=20230407 ; platform_system == "Windows"
+comtypes>=1.2.0 ; platform_system == "Windows"
