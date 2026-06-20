@@ -3,9 +3,10 @@
 import { motion } from "framer-motion";
 import {
   Hand, MousePointerClick, Volume2, Github, Download, ChevronRight,
-  Music, Sparkles, ArrowRight, Palette, Fingerprint,
+  Music, Sparkles, ArrowRight, Palette, Fingerprint, Piano as PianoIcon,
 } from "lucide-react";
 import { useHub } from "@/lib/gesture/hub-context";
+import { cn } from "@/lib/utils";
 
 const TOOLS = [
   {
@@ -34,6 +35,15 @@ const TOOLS = [
     desc: "A real-time procedural music engine powered by Tone.js. Right hand sets tempo & melody; left hand sets dynamics & harmony. Four scales, four progressions, five layers, drop button. No recordings.",
     color: "text-chart-4",
     glow: "from-fuchsia-500/30",
+  },
+  {
+    id: "piano" as const,
+    icon: PianoIcon,
+    title: "Gesture Piano",
+    tagline: "Play a virtual piano in the air",
+    desc: "A 1.5-octave keyboard you play by pinching over the keys. Four instruments (piano/synth/bell/pluck), volume, octave shift, C-major scale highlighting, and record + playback.",
+    color: "text-chart-1",
+    glow: "from-orange-500/30",
   },
   {
     id: "lab" as const,
@@ -116,13 +126,16 @@ export function Hero() {
           initial={{ opacity: 0, y: 40 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, delay: 0.5 }}
-          className="mt-20 grid sm:grid-cols-2 gap-5 max-w-4xl mx-auto"
+          className="mt-20 grid sm:grid-cols-2 lg:grid-cols-3 gap-5 max-w-5xl mx-auto"
         >
-          {TOOLS.map((t) => (
+          {TOOLS.map((t, i) => (
             <button
               key={t.id}
               onClick={() => go(t.id)}
-              className="group relative text-left rounded-2xl glass-strong p-6 overflow-hidden hover:-translate-y-1 transition-all duration-300"
+              className={cn(
+                "group relative text-left rounded-2xl glass-strong p-6 overflow-hidden hover:-translate-y-1 transition-all duration-300",
+                i === 4 && "lg:col-span-3"
+              )}
             >
               <div className={`absolute -top-12 -right-12 h-40 w-40 rounded-full bg-gradient-to-br ${t.glow} to-transparent blur-2xl opacity-60 group-hover:opacity-100 transition-opacity`} />
               <div className="relative">

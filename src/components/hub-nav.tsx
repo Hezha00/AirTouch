@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Hand, Home, MousePointer2, Music, Palette, Fingerprint, ChevronLeft } from "lucide-react";
+import { Hand, Home, MousePointer2, Music, Palette, Fingerprint, Piano as PianoIcon, ChevronLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useHub, type ViewName } from "@/lib/gesture/hub-context";
 
@@ -11,6 +11,7 @@ const TOOLS: { id: ViewName; label: string; icon: typeof Home }[] = [
   { id: "cursor", label: "Cursor", icon: MousePointer2 },
   { id: "canvas", label: "Canvas", icon: Palette },
   { id: "orchestra", label: "Orchestra", icon: Music },
+  { id: "piano", label: "Piano", icon: PianoIcon },
   { id: "lab", label: "Hand Lab", icon: Fingerprint },
 ];
 

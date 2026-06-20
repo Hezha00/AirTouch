@@ -63,11 +63,33 @@ export function AirCanvasView() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [gesture, setGesture] = useState("idle");
-  const [color, setColor] = useState("#00ff8c");
-  const [size, setSize] = useState(6);
+  const [color, setColor] = useState(() => {
+    if (typeof window === "undefined") return "#00ff8c";
+    return localStorage.getItem("aircanvas:color") || "#00ff8c";
+  });
+  const [size, setSize] = useState(() => {
+    if (typeof window === "undefined") return 6;
+    return parseInt(localStorage.getItem("aircanvas:size") || "6");
+  });
   const [eraser, setEraser] = useState(false);
   const [strokeCount, setStrokeCount] = useState(0);
   const [drawing, setDrawing] = useState(false);
+
+  // persist prefs
+  useEffect(() => {
+    if (typeof window !== "undefined") localStorage.setItem("aircanvas:color", color);
+    colorRef.current = color;
+  }, [color]);
+  useEffect(() => {
+    if (typeof window !== "undefined") localStorage.setItem("aircanvas:size", String(size));
+    sizeRef.current = size;
+  }, [size]);
+
+  // sync initial refs from persisted state
+  useEffect(() => {
+    colorRef.current = color;
+    sizeRef.current = size;
+  }, []);
 
   /* redraw all strokes onto the draw canvas */
   const redraw = useCallback(() => {
@@ -255,7 +277,7 @@ export function AirCanvasView() {
   };
   const stop = () => { tracking.stop(); setRunning(false); setGesture("idle"); };
 
-  // size the draw canvas to its container
+  // size the draw canvas to its container + handle window resize
   useEffect(() => {
     const dc = drawRef.current;
     if (dc) {
@@ -263,6 +285,19 @@ export function AirCanvasView() {
       dc.height = dc.clientHeight;
     }
   }, [running]);
+
+  useEffect(() => {
+    const onResize = () => {
+      const dc = drawRef.current;
+      if (dc && running) {
+        dc.width = dc.clientWidth;
+        dc.height = dc.clientHeight;
+        redraw();
+      }
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [running, redraw]);
 
   const undo = () => {
     if (strokesRef.current.length > 0) {
