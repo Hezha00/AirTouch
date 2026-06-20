@@ -5,24 +5,23 @@ Right-hand-only hand-landmark analysis + a level-triggered gesture engine.
 
 Gestures (priority, highest first):
   1. VOLUME         open palm (all 5 extended)        -> volume push/pull
-  2. VIRTUAL_KB     closed fist (all fingers folded)  -> toggle on-screen kbd
-  3. RIGHT_CLICK    thumb + middle pinch
+  2. RIGHT_CLICK    thumb + middle pinch
                     (index finger held extended -- cursor FROZEN during
                      this gesture so index tracking does not move the mouse)
-  4. LEFT_CLICK     thumb + index pinch                -> mouse-button-like
-                    (hold the pinch => left button stays down; release => up;
-                     double-tap the pinch => double click, etc.)
-  5. MOVE           index finger only                  -> move cursor
-  6. IDLE           anything else
+  3. LEFT_CLICK     thumb tip tucks to the index-MCP (the knuckle at the
+                    palm side of the index finger).  Only recognised when
+                    the thumb + index are extended and middle/ring/pinky
+                    are folded.  Level-triggered (mouse-button-like):
+                    hold the tuck => left button stays DOWN and the cursor
+                    keeps following the index tip (so you can DRAG);
+                    release the tuck => button UP; quick tuck+release =
+                    single click; two quick cycles = double click.
+  4. MOVE           index finger only                  -> move cursor
+  5. IDLE           anything else
 
-There are NO cooldowns.  Clicks are level-triggered (true mouse-button
-behaviour): the OS button is held down for as long as the pinch is held,
-and lifted when it is released.  A quick pinch+release is a single click,
-two quick pinch+release cycles are a double click, etc.
-
-All distances are computed in MediaPipe's normalised space and divided by
-the hand "reference size" (wrist -> middle-finger MCP) so that thresholds
-stay correct at any depth.
+There are NO cooldowns.  All distances are computed in MediaPipe's
+normalised space and divided by the hand "reference size" (wrist ->
+middle-finger MCP) so that thresholds stay correct at any depth.
 """
 
 from __future__ import annotations
@@ -55,10 +54,9 @@ _FINGER_PAIRS = (
 # ---- gesture identifiers -------------------------------------------------- #
 G_IDLE = "Idle"
 G_MOVE = "Move"
-G_LEFT_CLICK = "Left Click"        # pinch held = button down
+G_LEFT_CLICK = "Left Click"        # thumb tucked to index-MCP = button down
 G_RIGHT_CLICK = "Right Click"
 G_VOLUME = "Volume"               # open palm (push/pull handled separately)
-G_VIRTUAL_KB = "Virtual Keyboard" # closed fist
 
 
 # --------------------------------------------------------------------------- #
@@ -115,12 +113,6 @@ def is_open_palm(lm: Landmarks) -> bool:
     return all(finger_states(lm))
 
 
-def is_fist(lm: Landmarks) -> bool:
-    st = finger_states(lm)
-    # all four fingers folded; thumb may stick out sideways on a real fist
-    return (not st[1] and not st[2] and not st[3] and not st[4] and not st[0])
-
-
 # --------------------------------------------------------------------------- #
 #  Per-frame result
 # --------------------------------------------------------------------------- #
@@ -128,24 +120,24 @@ def is_fist(lm: Landmarks) -> bool:
 class GestureResult:
     name: str = G_IDLE
 
-    # raw cursor target (normalised index-tip coords), used for MOVE
+    # raw cursor target (normalised index-tip coords), used for MOVE and
+    # LEFT_CLICK (so the cursor keeps following the index tip while the
+    # left button is held -> enables dragging).
     cursor_target: tuple[float, float] | None = None
 
-    # level-triggered button states (True => button should be DOWN now)
-    left_down: bool = False
-    right_down: bool = False
     # edge events for this frame (transitions), consumed by main.py
-    left_pressed: bool = False       # pinch just closed  (button-down event)
-    left_released: bool = False      # pinch just opened  (button-up event)
+    left_pressed: bool = False       # thumb just tucked  (button-down event)
+    left_released: bool = False      # thumb just opened (button-up event)
     right_pressed: bool = False      # right pinch just closed -> single click
-    virtual_kb_toggled: bool = False # fist just formed -> toggle keyboard
 
     # volume: +1 push forward (up), -1 pull back (down), 0 none this frame
     volume_dir: int = 0
+    # how many media-key presses main.py should fire this frame (fast vol)
+    volume_presses: int = 0
 
     # raw signals for the UI (pinch meters, palm size)
-    pinch_di: float = 1.0       # thumb-index ratio
-    pinch_dm: float = 1.0       # thumb-middle ratio
+    tap_ratio: float = 1.0       # thumb-tip -> index-MCP ratio (left click)
+    pinch_dm: float = 1.0        # thumb-middle ratio (right click)
     palm_size: float = 0.0
 
 
@@ -160,9 +152,6 @@ class GestureEngine:
     _left_held: bool = False
     _right_held: bool = False
 
-    # virtual-keyboard toggle (edge on fist formation)
-    _fist_held: bool = False
-
     # volume push/pull size history
     _size_history: deque = field(default_factory=lambda: deque(maxlen=Config.VOL_SIZE_HISTORY))
 
@@ -170,15 +159,11 @@ class GestureEngine:
     def reset(self) -> None:
         """Clear transient state (call when the hand disappears)."""
         self._size_history.clear()
-        # NOTE: do NOT silently clear _left_held here -- main.py is
-        # responsible for releasing the OS button + resetting these when
-        # the hand is lost, via reset_buttons().
 
     def reset_buttons(self) -> None:
         """Force both button states to 'up' (call when hand is lost)."""
         self._left_held = False
         self._right_held = False
-        self._fist_held = False
 
     # ------------------------------------------------------------------ #
     def detect(self, lm: Landmarks) -> GestureResult:
@@ -188,22 +173,20 @@ class GestureEngine:
         ref = lm.reference_size
         res.palm_size = ref
 
-        # normalised pinch ratios (depth-invariant)
-        di = lm.dist(THUMB_TIP, INDEX_TIP) / ref
+        # normalised signals (depth-invariant)
+        # LEFT click signal: thumb tip -> index MCP (the palm-side knuckle)
+        tap = lm.dist(THUMB_TIP, INDEX_MCP) / ref
+        # RIGHT click signal: thumb tip -> middle tip
         dm = lm.dist(THUMB_TIP, MIDDLE_TIP) / ref
-        res.pinch_di = di
+        res.tap_ratio = tap
         res.pinch_dm = dm
 
-        # index tip is the cursor driver (for MOVE)
+        # index tip is the cursor driver (for MOVE and LEFT_CLICK drag)
         res.cursor_target = (lm.x(INDEX_TIP), lm.y(INDEX_TIP))
-
-        # hysteresis on each pinch to prevent button flutter
-        th = self.cfg.PINCH_THRESHOLD
-        rel = self.cfg.PINCH_RELEASE
 
         # ---- 1. VOLUME : open palm ------------------------------------- #
         if thumb and index and middle and ring and pinky:
-            res.volume_dir = self._volume_direction(ref)
+            res.volume_dir, res.volume_presses = self._volume_direction(ref)
             res.name = G_VOLUME
             # while in volume mode, make sure no button is held
             self._release_any_button(res)
@@ -211,27 +194,10 @@ class GestureEngine:
         # leaving volume -> clear size history so a re-entry is clean
         self._size_history.clear()
 
-        # ---- 2. VIRTUAL KEYBOARD : closed fist (edge toggle) ----------- #
-        if is_fist(lm):
-            res.name = G_VIRTUAL_KB
-            if not self._fist_held:
-                self._fist_held = True
-                res.virtual_kb_toggled = True
-            self._release_any_button(res)
-            return res
-        # fist released
-        self._fist_held = False
-
-        # ---- 3. RIGHT CLICK : thumb + middle pinch --------------------- #
-        # Per the user's spec: when right-clicking, the INDEX finger is
-        # held EXTENDED and the THUMB pinches the MIDDLE finger.  When the
-        # thumb pinches the middle, it often ends up near the index too,
-        # so we disambiguate by requiring the middle pinch to be TIGHTER
-        # than the index pinch (dm < di), not by requiring di to be large.
-        # The cursor is FROZEN during this gesture (main.py skips the
-        # cursor update when gesture == G_RIGHT_CLICK) so the extended
-        # index finger does not drift the pointer.
-        if index and dm < th and dm < di:
+        # ---- 2. RIGHT CLICK : thumb + middle pinch (index extended) ---- #
+        # Cursor is FROZEN during this gesture (main.py skips the cursor
+        # update) so the extended index finger does not drift the pointer.
+        if index and dm < self.cfg.PINCH_THRESHOLD and dm < tap:
             res.name = G_RIGHT_CLICK
             if not self._right_held:
                 self._right_held = True
@@ -242,39 +208,43 @@ class GestureEngine:
                 res.left_released = True
             return res
         # right pinch released (hysteresis)
-        if self._right_held and dm > rel:
+        if self._right_held and dm > self.cfg.PINCH_RELEASE:
             self._right_held = False
 
-        # ---- 4. LEFT CLICK : thumb + index pinch (mouse-like hold) ----- #
-        # Level-triggered: pinch held => left button DOWN; release => UP.
-        # A quick pinch+release = one click; two quick cycles = double click.
-        # Require the index pinch to be tighter than the middle pinch
-        # (di <= dm) so this does not collide with the right-click.
-        if di < th and di <= dm:
-            res.name = G_LEFT_CLICK
-            if not self._left_held:
-                self._left_held = True
-                res.left_pressed = True
-            return res
-        # left pinch released (hysteresis)
-        if self._left_held and di > rel:
-            self._left_held = False
-            res.left_released = True
+        # ---- 3. LEFT CLICK : thumb tip tucks to index-MCP ------------- #
+        # Pose gate: thumb + index extended, middle/ring/pinky folded.
+        # The click fires when the thumb tip is close to the index MCP.
+        # Level-triggered + the cursor KEEPS following the index tip while
+        # the button is held (handled in main.py) -> enables dragging.
+        # NOTE: when the thumb tucks to the palm, the thumb-extension check
+        # above may flip to False, so we re-check thumb extension using the
+        # *pre-tuck* geometry is not reliable.  Instead we accept the tuck
+        # itself as the trigger and only require index extended + the three
+        # other fingers folded.
+        if index and not middle and not ring and not pinky:
+            if tap < self.cfg.LEFT_TAP_THRESHOLD:
+                res.name = G_LEFT_CLICK
+                if not self._left_held:
+                    self._left_held = True
+                    res.left_pressed = True
+                return res
+            # tuck released (hysteresis)
+            if self._left_held and tap > self.cfg.LEFT_TAP_RELEASE:
+                self._left_held = False
+                res.left_released = True
 
-        # ---- 5. MOVE : index only -------------------------------------- #
+        # ---- 4. MOVE : index only (thumb not tucked) ------------------- #
         if index and not middle and not ring and not pinky:
             res.name = G_MOVE
-            res.left_down = self._left_held    # carry button state for HUD
             return res
 
-        # ---- 6. IDLE --------------------------------------------------- #
+        # ---- 5. IDLE --------------------------------------------------- #
         res.name = G_IDLE
-        res.left_down = self._left_held
         return res
 
     # ------------------------------------------------------------------ #
     def _release_any_button(self, res: GestureResult) -> None:
-        """Drop any held buttons (used when entering volume / fist modes)."""
+        """Drop any held buttons (used when entering volume mode)."""
         if self._left_held:
             self._left_held = False
             res.left_released = True
@@ -282,18 +252,22 @@ class GestureEngine:
             self._right_held = False
 
     # ------------------------------------------------------------------ #
-    #  Volume push / pull
+    #  Volume push / pull  (FAST: fires multiple presses per nudge)
     # ------------------------------------------------------------------ #
-    def _volume_direction(self, ref: float) -> int:
-        """+1 if hand growing (push forward), -1 if shrinking (pull back)."""
+    def _volume_direction(self, ref: float) -> tuple[int, int]:
+        """
+        Return (direction, n_presses).
+          direction   +1 push forward (up), -1 pull back (down), 0 none
+          n_presses   how many media-key presses to fire this frame
+        """
         self._size_history.append(ref)
         if len(self._size_history) < self.cfg.VOL_SIZE_HISTORY:
-            return 0
+            return 0, 0
         delta = self._size_history[-1] - self._size_history[0]
         if delta > self.cfg.VOL_SIZE_DELTA:
             self._size_history.clear()
-            return 1
+            return 1, self.cfg.VOL_NUDGE_PRESSES
         if delta < -self.cfg.VOL_SIZE_DELTA:
             self._size_history.clear()
-            return -1
-        return 0
+            return -1, self.cfg.VOL_NUDGE_PRESSES
+        return 0, 0

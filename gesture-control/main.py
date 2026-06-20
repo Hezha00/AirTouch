@@ -26,8 +26,8 @@ import pyautogui
 from config import Config
 from cursor_controller import CursorController
 from hand_gestures import (
-    GestureEngine, Landmarks,
-    G_IDLE, G_MOVE, G_LEFT_CLICK, G_RIGHT_CLICK, G_VOLUME, G_VIRTUAL_KB,
+    GestureEngine, GestureResult, Landmarks,
+    G_IDLE, G_MOVE, G_LEFT_CLICK, G_RIGHT_CLICK, G_VOLUME,
 )
 from hand_tracker import create_hand_tracker
 from ui import (
@@ -144,25 +144,6 @@ def draw_banner(frame: np.ndarray, text: str, sub: str = "",
 
 
 # --------------------------------------------------------------------------- #
-#  System-command helpers
-# --------------------------------------------------------------------------- #
-def toggle_virtual_keyboard() -> None:
-    """
-    Toggle the Windows touch keyboard (osk.exe) on/off.
-
-    We simply launch osk.exe; Windows brings it to the front if it is
-    already running, and the user can close it from its own UI.  This
-    avoids trying to detect/kill a process (which needs admin on some
-    setups) and keeps the gesture reliable.
-    """
-    import subprocess
-    try:
-        subprocess.Popen("osk.exe", shell=True)
-    except Exception as e:
-        print(f"[warn] could not launch virtual keyboard: {e}")
-
-
-# --------------------------------------------------------------------------- #
 #  Main loop
 # --------------------------------------------------------------------------- #
 def run(cfg: Config) -> None:
@@ -237,6 +218,8 @@ def run(cfg: Config) -> None:
             hand_present = False
             hand_lm = None
             hand_pts = None
+            # default result (used when no hand is detected)
+            res = GestureResult()
 
             if tracker is not None:
                 frame_ts = int(time.time() * 1000)
@@ -256,50 +239,50 @@ def run(cfg: Config) -> None:
 
                     # ---- execute actions (guarded against failsafe) ------- #
                     try:
-                        # 1. VOLUME push/pull
+                        # 1. VOLUME push/pull (FAST: fires multiple presses)
                         if gesture == G_VOLUME:
-                            if res.volume_dir > 0:
-                                pyautogui.press("volumeup")
-                                vol_display = min(1.0, vol_display + cfg.VOL_STEP)
+                            if res.volume_dir > 0 and res.volume_presses > 0:
+                                for _ in range(res.volume_presses):
+                                    pyautogui.press("volumeup")
+                                vol_display = min(1.0, vol_display + cfg.VOL_STEP * res.volume_presses)
                                 vol_indicator_dir = 1
-                            elif res.volume_dir < 0:
-                                pyautogui.press("volumedown")
-                                vol_display = max(0.0, vol_display - cfg.VOL_STEP)
+                            elif res.volume_dir < 0 and res.volume_presses > 0:
+                                for _ in range(res.volume_presses):
+                                    pyautogui.press("volumedown")
+                                vol_display = max(0.0, vol_display - cfg.VOL_STEP * res.volume_presses)
                                 vol_indicator_dir = -1
 
-                        # 2. VIRTUAL KEYBOARD toggle (edge on fist)
-                        elif gesture == G_VIRTUAL_KB:
-                            if res.virtual_kb_toggled:
-                                toggle_virtual_keyboard()
-
-                        # 3. RIGHT CLICK (single fire on pinch close)
+                        # 2. RIGHT CLICK (single fire on pinch close;
+                        #    cursor FROZEN so the extended index does not
+                        #    drift the pointer).
                         elif gesture == G_RIGHT_CLICK:
                             if res.right_pressed:
                                 pyautogui.rightClick()
-                            # cursor is intentionally NOT updated here:
-                            # the index finger is extended but we freeze
-                            # the mouse during the right-click so the
-                            # pointer does not drift.
 
-                        # 4. LEFT CLICK (mouse-button-like hold)
+                        # 3. LEFT CLICK (mouse-button-like hold + DRAG).
+                        #    While the thumb is tucked (button DOWN) the
+                        #    cursor KEEPS following the index tip so the
+                        #    user can drag.  Releasing the tuck fires
+                        #    left_released -> mouseUp.
                         elif gesture == G_LEFT_CLICK:
                             if res.left_pressed and not os_left_down:
                                 pyautogui.mouseDown(button="left")
                                 os_left_down = True
-                            # while held, do NOT move the cursor (the user
-                            # is clicking, not dragging from a move pose).
-                            # A pinch-and-hold = button stays down.
-                            # Releasing the pinch transitions to IDLE/MOVE
-                            # and fires left_released below.
+                            # keep following the index tip while the button
+                            # is held -> enables dragging
+                            if res.cursor_target is not None:
+                                sx, sy = cursor.update(*res.cursor_target)
+                                cursor.move_to(sx, sy)
+                                last_cursor = (int(sx), int(sy))
 
-                        # 5. MOVE
+                        # 4. MOVE
                         elif gesture == G_MOVE:
                             if res.cursor_target is not None:
                                 sx, sy = cursor.update(*res.cursor_target)
                                 cursor.move_to(sx, sy)
                                 last_cursor = (int(sx), int(sy))
 
-                        # Handle left-button release (fires when the pinch
+                        # Handle left-button release (fires when the tuck
                         # opens, regardless of current gesture).
                         if res.left_released and os_left_down:
                             pyautogui.mouseUp(button="left")
@@ -348,10 +331,12 @@ def run(cfg: Config) -> None:
                 draw_hand_label(frame, hand_pts, gesture, cfg)
                 if hand_lm is not None:
                     h, w = frame.shape[:2]
-                    ix, iy = int(hand_lm.x(8) * w), int(hand_lm.y(8) * h)
-                    draw_pinch_meter(frame, ix, iy,
-                                     res.pinch_di if hand_present else 1.0,
-                                     cfg.PINCH_THRESHOLD, cfg, label="L")
+                    # left-click meter near the thumb tip (tap ratio)
+                    tx, ty = int(hand_lm.x(4) * w), int(hand_lm.y(4) * h)
+                    draw_pinch_meter(frame, tx, ty,
+                                     res.tap_ratio if hand_present else 1.0,
+                                     cfg.LEFT_TAP_THRESHOLD, cfg, label="L")
+                    # right-click meter near the middle tip (pinch ratio)
                     mx, my = int(hand_lm.x(12) * w), int(hand_lm.y(12) * h)
                     draw_pinch_meter(frame, mx, my,
                                      res.pinch_dm if hand_present else 1.0,

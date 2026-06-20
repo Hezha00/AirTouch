@@ -4,7 +4,7 @@ ui.py
 All OpenCV drawing: hand skeleton, status HUD, the fixed-size help
 overlay, and the ASCII guide printed to the terminal on startup.
 
-Focused right-hand-only gesture set.
+Focused right-hand-only gesture set (no fist / no virtual keyboard).
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import numpy as np
 
 from config import Config
 from hand_gestures import (
-    G_IDLE, G_MOVE, G_LEFT_CLICK, G_RIGHT_CLICK, G_VOLUME, G_VIRTUAL_KB,
+    G_IDLE, G_MOVE, G_LEFT_CLICK, G_RIGHT_CLICK, G_VOLUME,
 )
 
 # MediaPipe hand skeleton.
@@ -33,7 +33,6 @@ GESTURE_COLORS = {
     G_LEFT_CLICK:  (0, 200, 255),
     G_RIGHT_CLICK: (0, 120, 255),
     G_VOLUME:      (200, 0, 255),
-    G_VIRTUAL_KB:  (255, 80, 255),
 }
 
 
@@ -53,17 +52,17 @@ def print_guide() -> None:
     Gesture                              Action
   -------------------------------------------------------------------
     INDEX finger only                    Move the mouse cursor
-    Pinch THUMB + INDEX  (holdable)      Left mouse button:
-                                           hold pinch  = button DOWN
-                                           release     = button UP
-                                           quick tap   = single click
-                                           double tap  = double click
-    Pinch THUMB + MIDDLE                 Right click (keep INDEX extended;
+    Tuck THUMB tip to the INDEX-MCP      Left mouse button (mouse-like):
+    (palm-side knuckle of the index        hold the tuck  = button DOWN
+     finger), with only the thumb +        release        = button UP
+     index extended                        quick tap      = single click
+                                           double tap     = double click
+                                           hold + move    = DRAG
+    Pinch THUMB + MIDDLE                  Right click (keep INDEX extended;
                                           cursor is FROZEN during the click
                                           so the mouse does not move)
-    CLOSED FIST                          Toggle the Windows virtual keyboard
-    OPEN PALM pushed toward camera       Volume UP
-    OPEN PALM pulled away from camera    Volume DOWN
+    OPEN PALM pushed toward camera       Volume UP  (fast)
+    OPEN PALM pulled away from camera    Volume DOWN (fast)
   -------------------------------------------------------------------
 
   CONTROLS
@@ -76,9 +75,13 @@ def print_guide() -> None:
   ----
     * There are NO cooldowns -- actions respond instantly.
     * The left click behaves exactly like a physical mouse button:
-      pinch-and-hold to drag, double-tap the pinch to double-click.
+      tuck-and-hold to drag, double-tap the tuck to double-click.
+      While the left button is held the cursor KEEPS following your
+      index finger, so you can drag naturally.
     * During a right-click (thumb+middle pinch) the cursor is frozen so
       your extended index finger does not drift the pointer.
+    * Volume changes quickly: each forward/backward nudge fires multiple
+      volume-up/down key presses.
     * Good, even lighting dramatically improves tracking.
     * Keep your hand ~40-60 cm from the camera.
 
@@ -123,6 +126,10 @@ def draw_landmarks(frame: np.ndarray, lm, cfg: Config,
     if len(pts) > 8:
         ix, iy = pts[8]
         cv2.circle(frame, (ix, iy), 9, cfg.ACCENT, 2, cv2.LINE_AA)
+    # highlight the index MCP (landmark 5) -- the left-click target
+    if len(pts) > 5:
+        mx, my = pts[5]
+        cv2.circle(frame, (mx, my), 7, (0, 200, 255), 1, cv2.LINE_AA)
 
 
 def draw_hand_label(frame: np.ndarray, lm, gesture: str, cfg: Config) -> None:
@@ -143,7 +150,7 @@ def draw_hand_label(frame: np.ndarray, lm, gesture: str, cfg: Config) -> None:
 
 
 def draw_pinch_meter(frame, cx, cy, ratio, threshold, cfg, label=""):
-    """Tiny vertical bar showing how close a pinch is to triggering."""
+    """Tiny vertical bar showing how close a trigger is to firing."""
     h, w = 30, 6
     x0, y0 = cx + 14, cy - h
     cv2.rectangle(frame, (x0, y0), (x0 + w, y0 + h), (60, 60, 60), -1)
@@ -219,11 +226,11 @@ def draw_volume_indicator(frame: np.ndarray, direction: int) -> None:
 # --------------------------------------------------------------------------- #
 _HELP_ROWS = [
     ("INDEX finger only",            "Move cursor"),
-    ("Pinch THUMB + INDEX (hold)",   "Left button down/up (mouse-like)"),
+    ("Tuck THUMB tip to INDEX-MCP",  "Left button down/up (mouse-like,"),
+    ("  (thumb+index extended)",     "  hold to drag, double-tap = dbl-click)"),
     ("Pinch THUMB + MIDDLE",         "Right click (cursor frozen)"),
-    ("CLOSED FIST",                  "Toggle virtual keyboard"),
-    ("OPEN PALM push toward cam",    "Volume UP"),
-    ("OPEN PALM pull away",          "Volume DOWN"),
+    ("OPEN PALM push toward cam",    "Volume UP  (fast)"),
+    ("OPEN PALM pull away",          "Volume DOWN (fast)"),
     ("H",                            "Toggle this help"),
     ("Q  /  ESC",                    "Quit"),
     ("Mouse -> corner",              "Failsafe abort"),
@@ -263,14 +270,14 @@ def draw_help_overlay(frame: np.ndarray, cfg: Config) -> None:
             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (220, 220, 220), 1, cv2.LINE_AA,
         )
         cv2.putText(
-            dim, "->", (px + 300, y),
+            dim, "->", (px + 360, y),
             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (140, 140, 140), 1, cv2.LINE_AA,
         )
         cv2.putText(
-            dim, action, (px + 330, y),
+            dim, action, (px + 395, y),
             cv2.FONT_HERSHEY_SIMPLEX, 0.5, cfg.ACCENT, 1, cv2.LINE_AA,
         )
-        y += 28
+        y += 30
 
     cv2.putText(
         dim, "Press H to close  |  Q / ESC to quit",
