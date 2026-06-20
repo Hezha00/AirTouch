@@ -3,7 +3,7 @@
 import { motion } from "framer-motion";
 import {
   Hand, MousePointerClick, Volume2, Github, Download, ChevronRight,
-  Music, Sparkles, ArrowRight, Palette, Fingerprint, Piano as PianoIcon, Presentation, Languages, FileText,
+  Music, Sparkles, ArrowRight, Palette, Fingerprint, Piano as PianoIcon, Presentation, Languages, FileText, Drum,
 } from "lucide-react";
 import { useHub } from "@/lib/gesture/hub-context";
 import { cn } from "@/lib/utils";
@@ -32,7 +32,7 @@ const TOOLS = [
     icon: FileText,
     title: "Air Whiteboard",
     tagline: "A structured gesture whiteboard",
-    desc: "Multi-page whiteboard with pen, rectangle, circle, line, and arrow tools. Pinch to draw, open hand to lift, fist to clear. Six colors, adjustable size, PNG export per page.",
+    desc: "Multi-page whiteboard with pen, rectangle, circle, line, arrow, and text tools. Pinch to draw, open hand to lift, fist to clear. Six colors, fill toggle, undo, PNG export per page.",
     color: "text-chart-3",
     glow: "from-amber-500/30",
   },
@@ -55,6 +55,15 @@ const TOOLS = [
     glow: "from-orange-500/30",
   },
   {
+    id: "drumkit" as const,
+    icon: Drum,
+    title: "Air Drumkit",
+    tagline: "Play a 6-pad drum kit in the air",
+    desc: "Six synthesized drum pads (kick, snare, hi-hat, two toms, cymbal). Move your hand over a pad and pinch to hit it. Volume control, record & playback your beats. All sounds generated live with Tone.js.",
+    color: "text-chart-5",
+    glow: "from-rose-500/30",
+  },
+  {
     id: "presenter" as const,
     icon: Presentation,
     title: "Air Presenter",
@@ -68,7 +77,7 @@ const TOOLS = [
     icon: Languages,
     title: "Sign Language Trainer",
     tagline: "Learn the ASL alphabet",
-    desc: "An accessibility + education tool. Browse 20 ASL letters, practice mode, or take a 60-second timed quiz. Live finger-pattern matching with a similarity meter and score.",
+    desc: "An accessibility + education tool. Browse 20 ASL letters, practice mode, or take a timed quiz (Easy/Medium/Hard). Live finger-pattern matching with a similarity meter and score.",
     color: "text-chart-5",
     glow: "from-violet-500/30",
   },
@@ -153,7 +162,7 @@ export function Hero() {
           initial={{ opacity: 0, y: 40 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, delay: 0.5 }}
-          className="mt-20 grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 max-w-6xl mx-auto"
+          className="mt-20 grid sm:grid-cols-2 lg:grid-cols-3 gap-5 max-w-5xl mx-auto"
         >
           {TOOLS.map((t) => (
             <button

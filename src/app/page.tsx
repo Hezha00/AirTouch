@@ -15,6 +15,7 @@ import { OrchestraView } from "@/components/views/orchestra-view";
 import { AirCanvasView } from "@/components/views/air-canvas-view";
 import { WhiteboardView } from "@/components/views/whiteboard-view";
 import { PianoView } from "@/components/views/piano-view";
+import { DrumkitView } from "@/components/views/drumkit-view";
 import { PresenterView } from "@/components/views/presenter-view";
 import { SignTrainerView } from "@/components/views/sign-trainer-view";
 import { HandLabView } from "@/components/views/hand-lab-view";
@@ -48,6 +49,7 @@ function AppShell() {
         {view === "canvas" && <AirCanvasView />}
         {view === "whiteboard" && <WhiteboardView />}
         {view === "piano" && <PianoView />}
+        {view === "drumkit" && <DrumkitView />}
         {view === "presenter" && <PresenterView />}
         {view === "sign" && <SignTrainerView />}
         {view === "lab" && <HandLabView />}
