@@ -61,43 +61,78 @@ def load_mediapipe_hands():
     """
     Return the MediaPipe ``Hands`` solution class in a version-robust way.
 
-    Tries, in order:
-      1. ``mediapipe.solutions.hands.Hands``  (after explicit submodule import)
-      2. ``mediapipe.python.solutions.hands.Hands``
-      3. Direct ``from mediapipe.solutions.hands import Hands``
-
-    Raises a clear RuntimeError with an actionable message if all fail.
+    Tries several import strategies and, on failure, reports EVERY error
+    (not just the last one) plus a full environment diagnostic so the real
+    cause is visible.
     """
-    last_err: Exception | None = None
+    import sys as _sys
+    import mediapipe as mp
 
-    # Strategy 1 + 3: force the submodules to load.
+    errors: list[str] = []
+
+    # Strategy 1: mediapipe.solutions.hands
     try:
-        importlib.import_module("mediapipe")
-        sol = importlib.import_module("mediapipe.solutions")
+        importlib.import_module("mediapipe.solutions")
         hands_mod = importlib.import_module("mediapipe.solutions.hands")
         if hasattr(hands_mod, "Hands"):
             return hands_mod.Hands, getattr(hands_mod, "HAND_CONNECTIONS", None)
-    except Exception as e:  # pragma: no cover - environment dependent
-        last_err = e
+        errors.append("mediapipe.solutions.hands imported but has no 'Hands'")
+    except Exception as e:
+        import traceback
+        errors.append(
+            f"mediapipe.solutions.hands -> {type(e).__name__}: {e}\n"
+            + traceback.format_exc().strip()
+        )
 
-    # Strategy 2: the python.solutions path used by some builds.
+    # Strategy 2: mediapipe.python.solutions.hands
     try:
         hands_mod = importlib.import_module("mediapipe.python.solutions.hands")
         if hasattr(hands_mod, "Hands"):
             return hands_mod.Hands, getattr(hands_mod, "HAND_CONNECTIONS", None)
+        errors.append("mediapipe.python.solutions.hands imported but has no 'Hands'")
     except Exception as e:
-        last_err = e
+        errors.append(
+            f"mediapipe.python.solutions.hands -> {type(e).__name__}: {e}"
+        )
 
-    # Nothing worked.
-    import mediapipe as mp
+    # ---- environment diagnostic ---------------------------------------- #
+    diag: list[str] = []
+    diag.append(f"Python   : {_sys.version.split()[0]}  ({_sys.executable})")
+    diag.append(f"mediapipe: {getattr(mp, '__version__', 'unknown')}  "
+                f"({getattr(mp, '__file__', '?')})")
+    diag.append("mp attrs : "
+                + str([a for a in dir(mp) if not a.startswith("_")]))
+    try:
+        import google.protobuf
+        diag.append(f"protobuf : {google.protobuf.__version__}")
+    except Exception as e:
+        diag.append(f"protobuf : <unavailable: {e}>")
+    try:
+        import numpy
+        diag.append(f"numpy    : {numpy.__version__}")
+    except Exception:
+        diag.append("numpy    : <unavailable>")
+    try:
+        import cv2
+        diag.append(f"opencv   : {cv2.__version__}")
+    except Exception:
+        diag.append("opencv   : <unavailable>")
+
     raise RuntimeError(
-        "Could not load MediaPipe Hands solution. "
-        f"(last error: {last_err})\n"
-        "mediapipe version: " + getattr(mp, "__version__", "unknown") + "\n"
-        "Fixes to try:\n"
-        "  1. pip install --upgrade --force-reinstall mediapipe\n"
-        "  2. pip install 'mediapipe<0.11'\n"
-        "  3. Use Python 3.10 or 3.11 (mediapipe has no wheels for 3.12+ yet)."
+        "Could not load MediaPipe Hands solution.\n"
+        "---- attempted strategies ----\n"
+        + "\n\n".join(f"[{i+1}] {e}" for i, e in enumerate(errors))
+        + "\n\n---- environment ----\n"
+        + "\n".join(diag)
+        + "\n\n---- most likely fixes ----\n"
+        "  A) Protobuf conflict (most common): "
+        "pip install 'protobuf<4'   (mediapipe needs protobuf 3.20.x)\n"
+        "  B) Force pure-python protobuf: set "
+        "PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python\n"
+        "  C) Pin a known-good mediapipe: "
+        "pip install 'mediapipe==0.10.14'\n"
+        "  D) Use Python 3.10 or 3.11 (mediapipe has limited 3.12+ support)\n"
+        "  Run 'python diagnose.py' for a full report."
     )
 
 
