@@ -3,7 +3,7 @@
 import { motion } from "framer-motion";
 import {
   Hand, MousePointerClick, Volume2, Github, Download, ChevronRight,
-  Music, Sparkles, ArrowRight, Palette, Fingerprint, Piano as PianoIcon, Presentation,
+  Music, Sparkles, ArrowRight, Palette, Fingerprint, Piano as PianoIcon, Presentation, Languages,
 } from "lucide-react";
 import { useHub } from "@/lib/gesture/hub-context";
 import { cn } from "@/lib/utils";
@@ -55,13 +55,22 @@ const TOOLS = [
     glow: "from-amber-500/30",
   },
   {
+    id: "sign" as const,
+    icon: Languages,
+    title: "Sign Language Trainer",
+    tagline: "Learn the ASL alphabet",
+    desc: "An accessibility + education tool. Browse the ASL alphabet reference, or start practice mode and form each letter with your hand — live finger-pattern matching with a similarity meter and score.",
+    color: "text-chart-5",
+    glow: "from-violet-500/30",
+  },
+  {
     id: "lab" as const,
     icon: Fingerprint,
     title: "Hand Lab",
     tagline: "Inspect all 21 landmarks in real time",
     desc: "An educational + developer visualizer: depth-shaded 2D skeleton, a rotating 3D projection, per-finger extension angles, and live FPS. See exactly what MediaPipe sees.",
-    color: "text-chart-5",
-    glow: "from-violet-500/30",
+    color: "text-chart-2",
+    glow: "from-teal-500/30",
   },
 ];
 
@@ -135,7 +144,7 @@ export function Hero() {
           initial={{ opacity: 0, y: 40 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, delay: 0.5 }}
-          className="mt-20 grid sm:grid-cols-2 lg:grid-cols-3 gap-5 max-w-5xl mx-auto"
+          className="mt-20 grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 max-w-6xl mx-auto"
         >
           {TOOLS.map((t) => (
             <button
