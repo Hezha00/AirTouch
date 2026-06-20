@@ -11,6 +11,8 @@ import { HowItWorks } from "@/components/sections/how-it-works";
 import { Ideas } from "@/components/sections/ideas";
 import { CursorControlView } from "@/components/views/cursor-control-view";
 import { OrchestraView } from "@/components/views/orchestra-view";
+import { AirCanvasView } from "@/components/views/air-canvas-view";
+import { HandLabView } from "@/components/views/hand-lab-view";
 
 function HomeView() {
   return (
@@ -34,6 +36,8 @@ function AppShell() {
         {view === "home" && <HomeView />}
         {view === "cursor" && <CursorControlView />}
         {view === "orchestra" && <OrchestraView />}
+        {view === "canvas" && <AirCanvasView />}
+        {view === "lab" && <HandLabView />}
       </main>
       {view === "home" && <SiteFooter />}
     </div>

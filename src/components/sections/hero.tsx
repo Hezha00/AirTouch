@@ -3,7 +3,7 @@
 import { motion } from "framer-motion";
 import {
   Hand, MousePointerClick, Volume2, Github, Download, ChevronRight,
-  Music, Sparkles, ArrowRight,
+  Music, Sparkles, ArrowRight, Palette, Fingerprint,
 } from "lucide-react";
 import { useHub } from "@/lib/gesture/hub-context";
 
@@ -18,13 +18,31 @@ const TOOLS = [
     glow: "from-emerald-500/30",
   },
   {
+    id: "canvas" as const,
+    icon: Palette,
+    title: "Air Canvas",
+    tagline: "Paint in the air with your finger",
+    desc: "A full-screen gesture drawing studio. Point to paint, pinch to lift the brush, open your hand to erase, make a fist to clear. Eight colors, adjustable brush, undo, and PNG export.",
+    color: "text-chart-2",
+    glow: "from-cyan-500/30",
+  },
+  {
     id: "orchestra" as const,
     icon: Music,
     title: "AI Conducting Orchestra",
-    tagline: "Conduct generative music with your hands",
-    desc: "A real-time procedural music engine powered by Tone.js. Hand height sets the tempo, position mixes the instruments, velocity drives intensity, and gestures toggle layers. No recordings — every note is synthesized live.",
+    tagline: "Conduct generative music with both hands",
+    desc: "A real-time procedural music engine powered by Tone.js. Right hand sets tempo & melody; left hand sets dynamics & harmony. Four scales, four progressions, five layers, drop button. No recordings.",
     color: "text-chart-4",
     glow: "from-fuchsia-500/30",
+  },
+  {
+    id: "lab" as const,
+    icon: Fingerprint,
+    title: "Hand Lab",
+    tagline: "Inspect all 21 landmarks in real time",
+    desc: "An educational + developer visualizer: depth-shaded 2D skeleton, a rotating 3D projection, per-finger extension angles, and live FPS. See exactly what MediaPipe sees.",
+    color: "text-chart-3",
+    glow: "from-amber-500/30",
   },
 ];
 
@@ -85,11 +103,11 @@ export function Hero() {
             <ChevronRight className="h-4 w-4 group-hover:translate-x-1 transition-transform" />
           </button>
           <button
-            onClick={() => go("orchestra")}
+            onClick={() => go("canvas")}
             className="flex items-center gap-2 px-6 py-3.5 rounded-xl glass text-foreground font-medium hover:bg-white/10 transition-all"
           >
-            <Music className="h-5 w-5 text-chart-4" />
-            Conduct the Orchestra
+            <Palette className="h-5 w-5 text-chart-2" />
+            Try Air Canvas
           </button>
         </motion.div>
 
@@ -98,7 +116,7 @@ export function Hero() {
           initial={{ opacity: 0, y: 40 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, delay: 0.5 }}
-          className="mt-20 grid sm:grid-cols-2 gap-5 max-w-3xl mx-auto"
+          className="mt-20 grid sm:grid-cols-2 gap-5 max-w-4xl mx-auto"
         >
           {TOOLS.map((t) => (
             <button
