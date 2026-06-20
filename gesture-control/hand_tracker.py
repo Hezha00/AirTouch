@@ -17,8 +17,21 @@ those builds the only way to track hands is the Tasks API, which needs:
   2. ``HandLandmarker.create_from_options()`` + ``detect()``.
 
 This module hides both behind one ``HandTracker.process(frame_bgr)``
-call that returns a list of 21 normalised (x, y) landmark tuples, so the
-rest of the app does not care which API is active.
+call that returns a list of dicts, each with:
+    {
+      "landmarks": [(x, y), ...],   # 21 normalised points
+      "handedness": "Left" | "Right" # CORRECTED for the mirrored feed
+    }
+so the rest of the app does not care which API is active.
+
+A note on handedness
+--------------------
+The camera feed is flipped horizontally (selfie view) so the user's
+movements feel natural.  MediaPipe runs on that flipped frame, so the
+label it returns is the mirror image of reality: when the user raises
+their RIGHT hand, MediaPipe (looking at the flipped image) reports
+"Left".  We invert the label here so downstream code sees the user's
+true hand.
 """
 
 from __future__ import annotations
@@ -85,6 +98,19 @@ def _model_path(cfg: Config) -> str:
     return path
 
 
+def _correct_handedness(label: str) -> str:
+    """
+    Invert MediaPipe's handedness label because we feed it a mirrored
+    (selfie) frame.  When the user raises their RIGHT hand, MediaPipe
+    sees it on the left side of the flipped image and reports "Left".
+    """
+    if label == "Left":
+        return "Right"
+    if label == "Right":
+        return "Left"
+    return label
+
+
 # --------------------------------------------------------------------------- #
 #  Tasks-API implementation
 # --------------------------------------------------------------------------- #
@@ -116,8 +142,8 @@ class _TasksHandTracker:
         """
         Run detection on a BGR frame.
 
-        Returns a list of landmark-lists (one per hand).  Each landmark
-        list is a list of 21 (x, y) tuples in normalised image coords.
+        Returns a list of dicts:
+            [{ "landmarks": [(x,y),...], "handedness": "Left"|"Right" }, ...]
         """
         rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
         mp_image = self._mp.Image(
@@ -126,8 +152,18 @@ class _TasksHandTracker:
         result = self._landmarker.detect_for_video(mp_image, timestamp_ms)
         hands = []
         if result.hand_landmarks:
-            for hl in result.hand_landmarks:
-                hands.append([(lm.x, lm.y) for lm in hl])
+            for i, hl in enumerate(result.hand_landmarks):
+                lms = [(lm.x, lm.y) for lm in hl]
+                # result.handedness[i] is a list of Category objects.
+                raw = "Unknown"
+                try:
+                    raw = result.handedness[i][0].category_name
+                except Exception:
+                    raw = "Unknown"
+                hands.append({
+                    "landmarks": lms,
+                    "handedness": _correct_handedness(raw),
+                })
         return hands
 
     def close(self) -> None:
@@ -161,8 +197,17 @@ class _LegacyHandTracker:
         rgb.flags.writeable = True
         hands = []
         if results.multi_hand_landmarks:
-            for hl in results.multi_hand_landmarks:
-                hands.append([(lm.x, lm.y) for lm in hl.landmark])
+            for i, hl in enumerate(results.multi_hand_landmarks):
+                lms = [(lm.x, lm.y) for lm in hl.landmark]
+                raw = "Unknown"
+                try:
+                    raw = results.multi_handedness[i].classification[0].label
+                except Exception:
+                    raw = "Unknown"
+                hands.append({
+                    "landmarks": lms,
+                    "handedness": _correct_handedness(raw),
+                })
         return hands
 
     def close(self) -> None:

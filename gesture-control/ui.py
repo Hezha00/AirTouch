@@ -3,6 +3,8 @@ ui.py
 =====
 All OpenCV drawing: hand skeleton, status HUD, the toggleable help
 overlay, and the ASCII guide printed to the terminal on startup.
+
+Updated for the two-handed gesture set.
 """
 
 from __future__ import annotations
@@ -12,7 +14,7 @@ import numpy as np
 
 from config import Config
 from hand_gestures import (
-    G_IDLE, G_MOVE, G_LCLICK, G_RCLICK, G_SCROLL, G_VOLUME,
+    G_IDLE, G_MOVE, G_LCLICK, G_RCLICK, G_SCROLL, G_VOLUME, G_WINTAB,
 )
 
 # MediaPipe hand skeleton (frozenset pairs of landmark indices).
@@ -33,6 +35,7 @@ GESTURE_COLORS = {
     G_RCLICK: (0, 120, 255),
     G_SCROLL: (255, 200, 0),
     G_VOLUME: (200, 0, 255),
+    G_WINTAB: (255, 80, 255),
 }
 
 
@@ -43,29 +46,31 @@ def print_guide() -> None:
     guide = r"""
 ==============================================================================
 ||                                                                          ||
-||        G E S T U R E   C O N T R O L   -   P C   v i a   H a n d        ||
+||     G E S T U R E   C O N T R O L   -   T W O   H A N D S   M O D E     ||
 ||                                                                          ||
 ==============================================================================
 
-  Control your Windows PC with your webcam.  Keep one hand in frame and
-  the active bounding box (the rectangle drawn on the feed).
+  Control your Windows PC with your webcam using BOTH hands.
+  The camera feed is mirrored, so left/right feel natural.
 
-  +------------------------------------------------------------------------+
-  |  GESTURE                        |  ACTION                              |
-  +---------------------------------+--------------------------------------+
-  |  Point with INDEX finger only   |  Move the mouse cursor               |
-  |  (other fingers folded)         |                                      |
-  +---------------------------------+--------------------------------------+
-  |  PINCH Index tip + Thumb tip    |  Left  click  (debounced)            |
-  +---------------------------------+--------------------------------------+
-  |  PINCH Middle tip + Thumb tip   |  Right click  (debounced)            |
-  +---------------------------------+--------------------------------------+
-  |  INDEX + MIDDLE extended, then  |  Scroll  (move hand up = up,         |
-  |  move hand up / down            |   move hand down = down)             |
-  +---------------------------------+--------------------------------------+
-  |  OPEN PALM (all 5 fingers out)  |  VOLUME mode:  push hand toward the  |
-  |                                 |  camera = louder, pull away = softer |
-  +---------------------------------+--------------------------------------+
+  =====================   RIGHT HAND   ===================================
+    Gesture                              Action
+  -------------------------------------------------------------------
+    INDEX finger only (others folded)    Move the mouse cursor
+    OPEN PALM  (all 5 fingers out)       VOLUME: push hand toward camera
+                                         = louder, pull away = softer
+    INDEX + MIDDLE extended & TIPS       SCROLL: move wrist UP = up,
+    TOUCHING, then move wrist up/down     move wrist DOWN = down
+  -------------------------------------------------------------------
+
+  =====================   LEFT HAND    ===================================
+    Gesture                              Action
+  -------------------------------------------------------------------
+    Pinch INDEX tip + THUMB tip          Left  click  (debounced)
+    THUMBS UP (only thumb up, pointing   Right click  (debounced)
+    up, other fingers folded)
+    FIST  (all fingers folded)           Win + Tab  (Task View)
+  -------------------------------------------------------------------
 
   CONTROLS
   --------
@@ -76,10 +81,11 @@ def print_guide() -> None:
   TIPS
   ----
     * Good, even lighting dramatically improves tracking.
-    * Keep your hand ~40-60 cm from the camera.
-    * Only ONE hand is tracked at a time (left or right).
-    * The cursor only moves while you are in MOVE pose, so pinching to
-      click will not drag the pointer around.
+    * Keep your hands ~40-60 cm from the camera.
+    * TWO hands are tracked at once (left + right).
+    * Raise only ONE hand if the other is not needed; the app handles
+      a missing hand gracefully.
+    * The cursor only moves while the RIGHT hand is in MOVE pose.
 
 ==============================================================================
 """
@@ -98,15 +104,21 @@ def draw_bounding_box(frame: np.ndarray, cfg: Config) -> None:
     cv2.rectangle(frame, (x1, y1), (x2, y2), cfg.BOX_COLOR, 1)
 
 
-def draw_landmarks(frame: np.ndarray, lm, cfg: Config) -> None:
+def draw_landmarks(frame: np.ndarray, lm, cfg: Config,
+                   color: tuple | None = None) -> None:
     """
     Draw the 21-point skeleton.
 
     ``lm`` may be EITHER:
       * a list of 21 (x, y) tuples in normalised 0..1 coords, OR
       * a legacy MediaPipe ``landmark`` object exposing ``.landmark[i].x/.y``.
+
+    ``color`` overrides the connection/joint colour (used to tint left vs
+    right hands).  Defaults to ``cfg.CONNECTION_COLOR``.
     """
     h, w = frame.shape[:2]
+    conn_color = color or cfg.CONNECTION_COLOR
+    joint_color = cfg.LANDMARK_COLOR
 
     # Normalise both forms to a list of (x, y) normalised tuples.
     if isinstance(lm, (list, tuple)) and len(lm) > 0 and isinstance(lm[0], (list, tuple)):
@@ -121,16 +133,38 @@ def draw_landmarks(frame: np.ndarray, lm, cfg: Config) -> None:
     # connections
     for a, b in HAND_CONNECTIONS:
         if a < len(pts) and b < len(pts):
-            cv2.line(frame, pts[a], pts[b], cfg.CONNECTION_COLOR, 2, cv2.LINE_AA)
+            cv2.line(frame, pts[a], pts[b], conn_color, 2, cv2.LINE_AA)
 
     # joints
     for px, py in pts:
-        cv2.circle(frame, (px, py), 4, cfg.LANDMARK_COLOR, -1, cv2.LINE_AA)
+        cv2.circle(frame, (px, py), 4, joint_color, -1, cv2.LINE_AA)
 
     # highlight the index tip (landmark 8) -- the cursor driver
     if len(pts) > 8:
         ix, iy = pts[8]
         cv2.circle(frame, (ix, iy), 9, cfg.ACCENT, 2, cv2.LINE_AA)
+
+
+def draw_hand_label(frame: np.ndarray, lm, label: str,
+                    gesture: str, cfg: Config) -> None:
+    """Draw a small label near the wrist: '<Hand> : <Gesture>'."""
+    h, w = frame.shape[:2]
+    norm_pts = lm if isinstance(lm, (list, tuple)) else []
+    if not norm_pts:
+        return
+    wx, wy = norm_pts[0]
+    px, py = int(wx * w), int(wy * h)
+    text = f"{label}: {gesture}"
+    color = GESTURE_COLORS.get(gesture, cfg.STATUS_FG)
+    # background pill
+    (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+    bx, by = px - 4, py + 8
+    cv2.rectangle(frame, (bx, by), (bx + tw + 8, by + th + 6),
+                  (0, 0, 0), -1)
+    cv2.rectangle(frame, (bx, by), (bx + tw + 8, by + th + 6),
+                  color, 1)
+    cv2.putText(frame, text, (bx + 4, by + th + 2),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
 
 
 def draw_pinch_meter(frame, cx, cy, ratio, threshold, cfg):
@@ -145,41 +179,48 @@ def draw_pinch_meter(frame, cx, cy, ratio, threshold, cfg):
 
 
 # --------------------------------------------------------------------------- #
-#  Status HUD (top-left)
+#  Status HUD (top-left) -- now shows BOTH hands
 # --------------------------------------------------------------------------- #
 def draw_status(
     frame: np.ndarray,
     cfg: Config,
-    gesture: str,
+    right_gesture: str,
+    left_gesture: str,
     cursor: tuple[int, int] | None,
     fps: float,
     volume_pct: float | None,
     vol_backend: str,
 ) -> None:
-    color = GESTURE_COLORS.get(gesture, cfg.STATUS_FG)
-
     lines = [
-        f"Gesture : {gesture}",
-        f"Cursor  : {cursor[0]:>4d}, {cursor[1]:>4d}" if cursor else "Cursor  :  --,  --",
-        f"FPS     : {fps:5.1f}",
+        f"Right : {right_gesture}",
+        f"Left  : {left_gesture}",
+        f"Cursor: {cursor[0]:>4d}, {cursor[1]:>4d}" if cursor else "Cursor:  --,  --",
+        f"FPS   : {fps:5.1f}",
     ]
     if volume_pct is not None:
-        lines.append(f"Volume  : {volume_pct:5.1f}%  [{vol_backend}]")
+        lines.append(f"Volume: {volume_pct:5.1f}%  [{vol_backend}]")
 
     pad = 8
     line_h = 22
     box_w = 320
     box_h = pad * 2 + line_h * len(lines)
 
-    # translucent background
+    rcolor = GESTURE_COLORS.get(right_gesture, cfg.STATUS_FG)
+    lcolor = GESTURE_COLORS.get(left_gesture, cfg.STATUS_FG)
+
     overlay = frame.copy()
     cv2.rectangle(overlay, (10, 10), (10 + box_w, 10 + box_h), cfg.STATUS_BG, -1)
     cv2.addWeighted(overlay, 0.55, frame, 0.45, 0, frame)
-    cv2.rectangle(frame, (10, 10), (10 + box_w, 10 + box_h), color, 1)
+    cv2.rectangle(frame, (10, 10), (10 + box_w, 10 + box_h), cfg.ACCENT, 1)
 
     for i, txt in enumerate(lines):
         y = 10 + pad + (i + 1) * line_h - 6
-        c = color if i == 0 else cfg.STATUS_FG
+        if i == 0:
+            c = rcolor
+        elif i == 1:
+            c = lcolor
+        else:
+            c = cfg.STATUS_FG
         cv2.putText(frame, txt, (22, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, c, 1, cv2.LINE_AA)
 
 
@@ -204,14 +245,23 @@ def draw_volume_bar(frame: np.ndarray, level: float) -> None:
 # --------------------------------------------------------------------------- #
 #  Toggleable help overlay
 # --------------------------------------------------------------------------- #
-_HELP_ROWS = [
-    ("INDEX finger only",          "Move cursor"),
-    ("Pinch INDEX + THUMB",        "Left click"),
-    ("Pinch MIDDLE + THUMB",       "Right click"),
-    ("INDEX + MIDDLE (move up/dn)","Scroll up / down"),
-    ("OPEN PALM (push/pull)",      "Volume louder / softer"),
-    ("H",                           "Toggle this help"),
-    ("Q  /  ESC",                   "Quit"),
+_HELP_SECTIONS = [
+    ("RIGHT HAND", [
+        ("INDEX finger only",           "Move cursor"),
+        ("OPEN PALM (push / pull)",     "Volume louder / softer"),
+        ("INDEX+MIDDLE tips touch,",    "Scroll (wrist up=up,"),
+        ("  move wrist up / down",       "  wrist down=down)"),
+    ]),
+    ("LEFT HAND", [
+        ("Pinch INDEX + THUMB",         "Left click"),
+        ("THUMBS UP",                   "Right click"),
+        ("FIST (all folded)",           "Win + Tab"),
+    ]),
+    ("KEYS", [
+        ("H",                            "Toggle this help"),
+        ("Q  /  ESC",                    "Quit"),
+        ("Mouse -> corner",             "Failsafe abort"),
+    ]),
 ]
 
 
@@ -222,7 +272,8 @@ def draw_help_overlay(frame: np.ndarray, cfg: Config) -> None:
     dim = (frame * 0.45).astype(np.uint8)
 
     # 2. panel
-    pw, ph = min(560, w - 40), 360
+    pw = min(620, w - 40)
+    ph = 440
     px = (w - pw) // 2
     py = (h - ph) // 2
 
@@ -233,27 +284,34 @@ def draw_help_overlay(frame: np.ndarray, cfg: Config) -> None:
 
     # 3. title
     cv2.putText(
-        dim, "GESTURE  GUIDE", (px + 24, py + 44),
-        cv2.FONT_HERSHEY_DUPLEX, 0.9, cfg.ACCENT, 1, cv2.LINE_AA,
+        dim, "GESTURE  GUIDE  (two-hand mode)", (px + 24, py + 44),
+        cv2.FONT_HERSHEY_DUPLEX, 0.8, cfg.ACCENT, 1, cv2.LINE_AA,
     )
     cv2.line(dim, (px + 24, py + 58), (px + pw - 24, py + 58), (90, 90, 90), 1)
 
-    # 4. rows
-    y = py + 92
-    for gesture, action in _HELP_ROWS:
+    # 4. sections
+    y = py + 90
+    for section_title, rows in _HELP_SECTIONS:
         cv2.putText(
-            dim, gesture, (px + 28, y),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1, cv2.LINE_AA,
+            dim, section_title, (px + 28, y),
+            cv2.FONT_HERSHEY_DUPLEX, 0.6, (255, 255, 255), 1, cv2.LINE_AA,
         )
-        cv2.putText(
-            dim, "->", (px + 330, y),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.55, (140, 140, 140), 1, cv2.LINE_AA,
-        )
-        cv2.putText(
-            dim, action, (px + 370, y),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.55, cfg.ACCENT, 1, cv2.LINE_AA,
-        )
-        y += 34
+        y += 28
+        for gesture, action in rows:
+            cv2.putText(
+                dim, gesture, (px + 40, y),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (220, 220, 220), 1, cv2.LINE_AA,
+            )
+            cv2.putText(
+                dim, "->", (px + 350, y),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (140, 140, 140), 1, cv2.LINE_AA,
+            )
+            cv2.putText(
+                dim, action, (px + 385, y),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, cfg.ACCENT, 1, cv2.LINE_AA,
+            )
+            y += 24
+        y += 10
 
     cv2.putText(
         dim, "Press H to close  |  Q / ESC to quit",

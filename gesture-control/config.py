@@ -1,7 +1,7 @@
 """
 config.py
 =========
-Central configuration for the Gesture Control application.
+Central configuration for the two-handed Gesture Control application.
 
 Every "magic number" lives here so the app can be tuned without digging
 through the control logic.  Distances are expressed in MediaPipe's
@@ -21,9 +21,9 @@ class Config:
     CAM_FPS: int = 30
 
     # ------------------------------------------------------------------ #
-    # MediaPipe Hands
+    # MediaPipe Hands  --  TWO hands now (left + right)
     # ------------------------------------------------------------------ #
-    MAX_NUM_HANDS: int = 1
+    MAX_NUM_HANDS: int = 2
     MIN_DETECTION_CONFIDENCE: float = 0.7
     MIN_TRACKING_CONFIDENCE: float = 0.7
 
@@ -41,38 +41,44 @@ class Config:
 
     # Safety margin (pixels) kept clear around the screen edges so the
     # gesture-driven cursor can NEVER reach a corner and accidentally
-    # trigger PyAutoGUI's fail-safe abort.  The fail-safe itself stays
-    # enabled so the user can still abort by physically pushing the mouse
-    # into a corner.
+    # trigger PyAutoGUI's fail-safe abort.
     SCREEN_MARGIN: int = 20
 
-    # Re-assert the OpenCV window as topmost every N frames (some window
-    # managers drop the topmost flag after focus changes).
+    # Re-assert the OpenCV window as topmost every N frames.
     TOPMOST_REFRESH_FRAMES: int = 60
 
     # ------------------------------------------------------------------ #
-    # Click / pinch detection
+    # Click / pinch detection  (LEFT HAND)
     # ------------------------------------------------------------------ #
     # Distances are normalised by the hand reference size
     # (wrist -> middle-finger MCP), so the threshold is depth-invariant.
     PINCH_THRESHOLD: float = 0.40   # strict: pinch fires below this ratio
     CLICK_COOLDOWN: float = 0.45    # seconds between consecutive clicks
+    WIN_TAB_COOLDOWN: float = 1.0   # seconds between Win+Tab triggers
 
     # ------------------------------------------------------------------ #
-    # Scroll
+    # Scroll  (RIGHT HAND: index+middle touching + wrist up/down)
     # ------------------------------------------------------------------ #
+    # Two extended fingers whose TIPS are touching count as "scroll mode".
+    SCROLL_PINCH_THRESHOLD: float = 0.50
     SCROLL_HISTORY: int = 6         # frames used to measure vertical delta
     SCROLL_THRESHOLD: float = 0.045 # normalised delta-y to trigger a scroll
     SCROLL_TICKS: int = 3           # pyautogui.scroll() units per trigger
 
     # ------------------------------------------------------------------ #
-    # Volume (Z-axis / proximity) control
+    # Volume (Z-axis / proximity) control  (RIGHT HAND open palm)
     # ------------------------------------------------------------------ #
-    # Hand reference size (wrist -> middle MCP) mapped to 0..100% volume.
     VOL_MIN_DIST: float = 0.12      # hand far  -> 0%
     VOL_MAX_DIST: float = 0.32      # hand near -> 100%
     VOL_EMA_ALPHA: float = 0.20     # smoothing for the proximity signal
     VOL_DEADBAND: float = 0.015     # ignore tiny changes (anti-flutter)
+
+    # ------------------------------------------------------------------ #
+    # Thumbs-up detection  (LEFT HAND)
+    # ------------------------------------------------------------------ #
+    # Thumb tip must be clearly above the IP joint AND clearly above all
+    # other fingertips for a "thumbs up".
+    THUMB_UP_RATIO: float = 1.5     # thumb-extension / hand-reference
 
     # ------------------------------------------------------------------ #
     # Visuals
@@ -84,6 +90,8 @@ class Config:
     STATUS_BG: tuple = (30, 30, 30)
     STATUS_FG: tuple = (255, 255, 255)
     ACCENT: tuple = (0, 255, 140)              # green accent (BGR)
+    RIGHT_HAND_COLOR: tuple = (0, 255, 140)    # green  (BGR)
+    LEFT_HAND_COLOR: tuple = (255, 180, 80)    # orange (BGR)
 
     # ------------------------------------------------------------------ #
     # Safety

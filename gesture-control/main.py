@@ -26,13 +26,13 @@ import pyautogui
 from config import Config
 from cursor_controller import CursorController
 from hand_gestures import (
-    GestureEngine, Landmarks,
-    G_IDLE, G_MOVE, G_LCLICK, G_RCLICK, G_SCROLL, G_VOLUME,
+    TwoHandGestureEngine, Landmarks,
+    G_IDLE, G_MOVE, G_LCLICK, G_RCLICK, G_SCROLL, G_VOLUME, G_WINTAB,
 )
 from hand_tracker import create_hand_tracker
 from ui import (
     print_guide, draw_bounding_box, draw_landmarks, draw_status,
-    draw_volume_bar, draw_help_overlay, draw_pinch_meter,
+    draw_volume_bar, draw_help_overlay, draw_pinch_meter, draw_hand_label,
 )
 from volume_control import VolumeController
 
@@ -150,7 +150,7 @@ def run(cfg: Config) -> None:
     configure_pyautogui(cfg)
 
     cursor = CursorController(cfg)
-    engine = GestureEngine(cfg=cfg)
+    engine = TwoHandGestureEngine(cfg=cfg)
     volume = VolumeController()
 
     print(f"[init] screen resolution : {cursor.screen_w} x {cursor.screen_h}")
@@ -183,7 +183,6 @@ def run(cfg: Config) -> None:
     fps = 0.0
     last_cursor: tuple[int, int] | None = None
     active_volume_pct: float | None = None
-    # Monotonic timestamp for the Tasks API (detect_for_video needs ms).
     frame_ts = 0
     frame_count = 0
     failsafe_triggered = False
@@ -203,66 +202,94 @@ def run(cfg: Config) -> None:
             # 1. mirror for a natural "selfie" feel
             frame = cv2.flip(frame, 1)
 
-            gesture = G_IDLE
-            pinch_l = pinch_r = 1.0
+            right_gesture = G_IDLE
+            left_gesture = G_IDLE
+            # Track which hands are present so we can reset transient state.
+            right_present = False
+            left_present = False
 
             if tracker is not None:
-                # 2. run hand detection (API-agnostic).
+                # 2. run hand detection (returns list of {landmarks, handedness}).
                 frame_ts = int(time.time() * 1000)
                 hands = tracker.process(frame, frame_ts)
 
-                if hands:
-                    # Use the first (strongest) hand.
-                    norm_pts = hands[0]
+                for hand in hands:
+                    norm_pts = hand["landmarks"]
+                    handedness = hand["handedness"]
                     lm = Landmarks(pts=norm_pts)
+                    res = engine.detect(lm, handedness)
 
-                    res = engine.detect(lm)
-                    gesture = res.name
-                    pinch_l, pinch_r = res.pinch_ratio_l, res.pinch_ratio_r
+                    # Choose skeleton colour by hand.
+                    if handedness == "Right":
+                        right_present = True
+                        right_gesture = res.name
+                        skel_color = cfg.RIGHT_HAND_COLOR
+                        label = "R"
+                    elif handedness == "Left":
+                        left_present = True
+                        left_gesture = res.name
+                        skel_color = cfg.LEFT_HAND_COLOR
+                        label = "L"
+                    else:
+                        skel_color = cfg.LANDMARK_COLOR
+                        label = "?"
 
                     # ---- act on the gesture --------------------------- #
-                    #  All pyautogui calls are guarded: a FailSafeException
-                    #  means the user deliberately shoved the mouse into a
-                    #  screen corner to abort, so we exit the loop cleanly
-                    #  instead of dumping a traceback.
                     try:
-                        if res.cursor_target is not None:
-                            if gesture == G_MOVE:
+                        if handedness == "Right":
+                            if res.cursor_target is not None and res.name == G_MOVE:
                                 sx, sy = cursor.update(*res.cursor_target)
                                 cursor.move_to(sx, sy)
                                 last_cursor = (int(sx), int(sy))
-                            elif gesture in (G_LCLICK, G_RCLICK):
-                                cursor.update(*res.cursor_target)
+                            elif res.name == G_VOLUME and res.volume_level is not None:
+                                volume.set_level(res.volume_level)
+                                active_volume_pct = res.volume_level * 100.0
+                            elif res.name == G_SCROLL and res.scroll_delta != 0.0:
+                                ticks = cfg.SCROLL_TICKS
+                                pyautogui.scroll(-ticks if res.scroll_delta > 0 else ticks)
+                            # leaving MOVE/VOLUME/SCROLL clears cursor EMA?
+                            # only reset cursor EMA when right hand disappears.
 
-                        if gesture == G_LCLICK:
-                            pyautogui.click(button="left")
-                        elif gesture == G_RCLICK:
-                            pyautogui.click(button="right")
-                        elif gesture == G_SCROLL and res.scroll_delta != 0.0:
-                            ticks = cfg.SCROLL_TICKS
-                            pyautogui.scroll(-ticks if res.scroll_delta > 0 else ticks)
-                        elif gesture == G_VOLUME and res.volume_level is not None:
-                            volume.set_level(res.volume_level)
-                            active_volume_pct = res.volume_level * 100.0
-                        else:
-                            if gesture != G_VOLUME:
-                                active_volume_pct = None
+                        elif handedness == "Left":
+                            if res.name == G_LCLICK:
+                                pyautogui.click(button="left")
+                            elif res.name == G_RCLICK:
+                                pyautogui.click(button="right")
+                            elif res.name == G_WINTAB:
+                                pyautogui.hotkey("win", "tab")
                     except pyautogui.FailSafeException:
                         failsafe_triggered = True
                         break
 
-                    # ---- visual skeleton + pinch meters --------------- #
-                    draw_landmarks(frame, norm_pts, cfg)
-                    h, w = frame.shape[:2]
-                    ix, iy = int(lm.x(8) * w), int(lm.y(8) * h)
-                    draw_pinch_meter(frame, ix, iy, pinch_l,
-                                     cfg.PINCH_THRESHOLD, cfg)
-                    mx, my = int(lm.x(12) * w), int(lm.y(12) * h)
-                    draw_pinch_meter(frame, mx, my, pinch_r,
-                                     cfg.PINCH_THRESHOLD, cfg)
-                else:
-                    engine.reset()
+                    # ---- visual skeleton + per-hand label ------------- #
+                    draw_landmarks(frame, norm_pts, cfg, color=skel_color)
+                    draw_hand_label(frame, norm_pts, label, res.name, cfg)
+
+                    # pinch meter for the left-hand pinch (index/thumb)
+                    if handedness == "Left":
+                        h, w = frame.shape[:2]
+                        ix, iy = int(lm.x(8) * w), int(lm.y(8) * h)
+                        draw_pinch_meter(frame, ix, iy,
+                                         res.pinch_ratio_l,
+                                         cfg.PINCH_THRESHOLD, cfg)
+
+                if failsafe_triggered:
+                    break
+
+                # Reset transient state for any hand that vanished.
+                if not right_present:
+                    # Right hand gone -> stop volume + scroll bookkeeping,
+                    # and clear the cursor EMA so a re-entry doesn't snap.
+                    if right_gesture != G_VOLUME:
+                        active_volume_pct = None
+                    engine._scroll_history.clear()
+                    engine._vol_smooth = None
                     cursor.reset()
+                if not left_present:
+                    # nothing to reset for the left hand except cooldowns,
+                    # which are time-based and self-expire.
+                    pass
+                if not right_present and not left_present:
                     active_volume_pct = None
             else:
                 # Hand tracking unavailable -> still show the live feed.
@@ -285,7 +312,7 @@ def run(cfg: Config) -> None:
                 last_cursor = (px, py)
             draw_bounding_box(frame, cfg)
             draw_status(
-                frame, cfg, gesture, last_cursor, fps,
+                frame, cfg, right_gesture, left_gesture, last_cursor, fps,
                 active_volume_pct, volume.status_label(),
             )
             if active_volume_pct is not None:
