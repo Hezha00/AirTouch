@@ -1,31 +1,29 @@
-'use client'
+import { SiteNav } from "@/components/site-nav";
+import { SiteFooter } from "@/components/site-footer";
+import { Hero } from "@/components/sections/hero";
+import { Stats } from "@/components/sections/stats";
+import { LiveDemo } from "@/components/sections/live-demo";
+import { Features } from "@/components/sections/features";
+import { GestureGuide } from "@/components/sections/gesture-guide";
+import { HowItWorks } from "@/components/sections/how-it-works";
+import { Setup } from "@/components/sections/setup";
+import { Ideas } from "@/components/sections/ideas";
 
 export default function Home() {
   return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      minHeight: '100vh',
-      gap: '2rem',
-      padding: '1rem'
-    }}>
-      <div style={{
-        position: 'relative',
-        width: '6rem',
-        height: '6rem'
-      }}>
-        <img
-          src="/logo.svg"
-          alt="Z.ai Logo"
-          style={{
-            width: '100%',
-            height: '100%',
-            objectFit: 'contain'
-          }}
-        />
-      </div>
+    <div className="relative min-h-screen flex flex-col">
+      <SiteNav />
+      <main className="flex-1">
+        <Hero />
+        <Stats />
+        <LiveDemo />
+        <Features />
+        <GestureGuide />
+        <HowItWorks />
+        <Setup />
+        <Ideas />
+      </main>
+      <SiteFooter />
     </div>
-  )
+  );
 }

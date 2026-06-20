@@ -14,24 +14,25 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Z.ai Code Scaffold - AI-Powered Development",
-  description: "Modern Next.js scaffold optimized for AI-powered development with Z.ai. Built with TypeScript, Tailwind CSS, and shadcn/ui.",
-  keywords: ["Z.ai", "Next.js", "TypeScript", "Tailwind CSS", "shadcn/ui", "AI development", "React"],
-  authors: [{ name: "Z.ai Team" }],
-  icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
-  },
+  title: "AirTouch — Control Your PC With Hand Gestures",
+  description:
+    "An open-source, webcam-powered gesture controller for Windows. Move the cursor, click, drag, scroll, and adjust volume — all with your bare hands. Try the live in-browser demo.",
+  keywords: [
+    "gesture control",
+    "hand tracking",
+    "MediaPipe",
+    "computer vision",
+    "OpenCV",
+    "touchless mouse",
+    "air mouse",
+    "webcam control",
+  ],
+  authors: [{ name: "AirTouch" }],
   openGraph: {
-    title: "Z.ai Code Scaffold",
-    description: "AI-powered development with modern React stack",
-    url: "https://chat.z.ai",
-    siteName: "Z.ai",
+    title: "AirTouch — Control Your PC With Hand Gestures",
+    description:
+      "Webcam-powered gesture controller. Move, click, drag, scroll, and control volume with your bare hands.",
     type: "website",
-  },
-  twitter: {
-    card: "summary_large_image",
-    title: "Z.ai Code Scaffold",
-    description: "AI-powered development with modern React stack",
   },
 };
 
