@@ -300,7 +300,7 @@ export function AirCanvasView() {
   useEffect(() => { setStrokeCount(strokesRef.current.length); });
 
   return (
-    <div className="relative min-h-screen pt-20 pb-12">
+    <div className="relative min-h-screen pt-16 sm:pt-20 pb-12">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         {/* header */}
         <div className="mb-6 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
@@ -372,7 +372,7 @@ export function AirCanvasView() {
           </div>
 
           {/* ---- tools sidebar ---- */}
-          <div className="flex flex-col gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-1 gap-3">
             {/* colors */}
             <div className="rounded-xl glass-strong p-4">
               <div className="text-xs text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-1.5">

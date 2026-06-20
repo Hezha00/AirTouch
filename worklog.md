@@ -6,7 +6,7 @@ AirTouch is a **browser-based gesture-recognition hub** with **4 interactive too
 
 The Python desktop app still lives in `/gesture-control/` as the downloadable backend.
 
-**This phase**: Added two new tools — **Air Canvas** (gesture drawing studio) and **Hand Lab** (21-landmark visualizer with 3D projection) — bringing the hub from 2 tools to 4. Polished the home page to showcase all 4 tools in a 2×2 grid.
+**This phase**: Completed the **mobile/responsive pass** (the #1 priority from the previous worklog). The hub nav, all 4 tool views, and the home hero now render cleanly from 390px (iPhone) up to 1440px+ desktop with no horizontal overflow, proper stacking, and tappable targets.
 
 ## Architecture
 
@@ -30,26 +30,18 @@ The Python desktop app still lives in `/gesture-control/` as the downloadable ba
 
 ## Completed this phase
 
-1. **Air Canvas** (`air-canvas-view.tsx`) — a full gesture painting studio:
-   - Point with index finger to paint; pinch to lift the brush; open hand = eraser; fist = clear canvas.
-   - 8-color palette, adjustable brush size (2–40px), Paint/Erase mode toggle.
-   - Undo (last stroke), Clear all, Save PNG (composites on dark bg for export).
-   - Live cursor follower with mode-colored glow; stroke counter; camera thumbnail with skeleton overlay.
-   - Stroke-based rendering (strokes stored as point arrays, redrawn on undo/clear).
-2. **Hand Lab** (`hand-lab-view.tsx`) — educational/developer landmark visualizer:
-   - Depth-shaded 2D skeleton on the camera feed (joint size + connection opacity scale with z).
-   - Rotating 3D projection canvas (Y-axis rotation using landmark z, auto-rotate toggle).
-   - Per-finger extension bars (Thumb/Index/Middle/Ring/Pinky, 0–100%).
-   - Live FPS counter, gesture readout, palm-size metric.
-   - Full 21-landmark name list (Wrist → Pinky tip).
-3. **Home page updated** — hero now showcases all 4 tools in a 2×2 card grid; CTAs updated to "Launch Cursor Control" + "Try Air Canvas"; nav expanded to 5 tabs.
-4. **Verified** — ESLint clean, page returns 200, agent-browser confirms all 5 views render correctly with no JS errors.
+1. **Hub nav responsive** (`hub-nav.tsx`) — the 5-tab pill switcher is now horizontally scrollable on mobile with compact icon-only buttons (labels appear `sm:inline`), `flex-shrink-0` on each tab so they don't squish, `aria-label` for accessibility, smaller padding/text on mobile (`px-2 text-xs` → `sm:px-3 text-sm`), and the nav height drops to `h-14` on mobile. Added `overflow-x-auto scrollbar-thin` so off-screen tabs scroll. The "Back to hub" button now only shows `lg:flex` (was `md:flex`) to avoid crowding.
+2. **All 4 tool views** — patched `pt-20` → `pt-16 sm:pt-20` across cursor-control, air-canvas, orchestra, hand-lab views to clear the shorter mobile nav.
+3. **Air Canvas sidebar** — changed the tools sidebar from `flex flex-col` to `grid grid-cols-2 lg:grid-cols-1` so on mobile the color/brush/mode/actions/gesture/stats cards arrange in a compact 2-column grid instead of one very tall column.
+4. **Home hero typography** — `text-5xl` → `text-4xl sm:text-7xl lg:text-8xl` so the title fits 390px without overflow.
+5. **Verified** — ESLint clean, page returns 200, agent-browser confirms: mobile home (390×844) nav fits + hero readable + CTAs stack; mobile canvas sidebar in 2-col grid; mobile orchestra + lab stack correctly; desktop (1440×900) unaffected with no regression.
 
 ## Verification results
 
 - `bun run lint` → clean (no errors/warnings).
 - Dev server: `GET / 200`, no compile errors.
-- agent-browser visual QA: all 5 views (home, cursor, canvas, orchestra, lab) render with all expected elements, no overlaps or broken layout.
+- agent-browser visual QA at 390×844 (iPhone): home, canvas, orchestra, lab all render with no horizontal overflow, proper stacking, tappable targets.
+- agent-browser visual QA at 1440×900 (desktop): home renders identically to before — no regression from the responsive changes.
 - Console: only HMR info logs + Tone.js banner; no runtime errors after clean reload.
 
 ## Unresolved issues / risks
@@ -62,9 +54,9 @@ The Python desktop app still lives in `/gesture-control/` as the downloadable ba
 
 ## Priority recommendations for next phase
 
-1. **Mobile/responsive pass** — the tool views are desktop-first; test + tune at phone widths (camera + sidebar grids should stack, nav should scroll/wrap).
-2. **Persist user prefs** — Air Canvas color/size, Orchestra layer volumes/scale/progression, etc. in `localStorage`.
-3. **Air Canvas resize handler** — re-size the draw canvas on window resize and re-redraw strokes.
-4. **Bundle MediaPipe locally** — move the `.task` model + WASM into `/public` so tools work offline and load faster.
-5. **Add a 5th tool** — e.g. "Gesture Piano" (tap virtual keys in the air with pinches), "Air Presenter" (slide navigation + laser pointer), or "Sign Language Alphabet" trainer.
-6. **Performance throttling** — only update React state when values change by a threshold to cut re-renders.
+1. **Persist user prefs** — Air Canvas color/size, Orchestra layer volumes/scale/progression, etc. in `localStorage`.
+2. **Air Canvas resize handler** — re-size the draw canvas on window resize and re-redraw strokes (currently sized once on `running` change).
+3. **Bundle MediaPipe locally** — move the `.task` model + WASM into `/public` so tools work offline and load faster.
+4. **Add a 5th tool** — e.g. "Gesture Piano" (tap virtual keys in the air with pinches), "Air Presenter" (slide navigation + laser pointer), or "Sign Language Alphabet" trainer.
+5. **Performance throttling** — only update React state when values change by a threshold to cut re-renders.
+6. **Tablet (768px) fine-tune** — the views stack at `lg` (1024px); a dedicated tablet pass could keep camera + sidebar side-by-side a bit longer with tighter spacing.

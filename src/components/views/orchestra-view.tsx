@@ -284,7 +284,7 @@ export function OrchestraView() {
   const intensity = dynamicLevel / 5;
 
   return (
-    <div className="relative min-h-screen pt-20 pb-12">
+    <div className="relative min-h-screen pt-16 sm:pt-20 pb-12">
       {/* ambient background */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <motion.div

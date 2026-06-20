@@ -35,21 +35,20 @@ export function HubNav() {
         scrolled ? "glass-strong border-b border-border/50" : "bg-transparent"
       )}
     >
-      <nav className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="flex h-16 items-center justify-between gap-4">
-          <button onClick={() => go("home")} className="flex items-center gap-2 group">
+      <nav className="mx-auto max-w-7xl px-3 sm:px-6 lg:px-8">
+        <div className="flex h-14 sm:h-16 items-center justify-between gap-2 sm:gap-4">
+          <button onClick={() => go("home")} className="flex items-center gap-2 group flex-shrink-0">
             <div className="relative">
               <div className="absolute inset-0 bg-primary/40 blur-md rounded-lg group-hover:bg-primary/60 transition-colors" />
-              <Hand className="relative h-6 w-6 text-primary" />
+              <Hand className="relative h-5 w-5 sm:h-6 sm:w-6 text-primary" />
             </div>
-            <span className="font-bold text-lg tracking-tight hidden sm:inline">
+            <span className="font-bold text-base sm:text-lg tracking-tight hidden sm:inline">
               Air<span className="text-gradient">Touch</span>
             </span>
-            <span className="text-xs text-muted-foreground ml-1 hidden md:inline">/ Gesture Hub</span>
           </button>
 
-          {/* tool switcher */}
-          <div className="flex items-center gap-1 p-1 rounded-xl glass">
+          {/* tool switcher — horizontally scrollable on mobile */}
+          <div className="flex items-center gap-0.5 sm:gap-1 p-1 rounded-xl glass overflow-x-auto scrollbar-thin max-w-full flex-1 sm:flex-none justify-end">
             {TOOLS.map((t) => {
               const active = view === t.id;
               return (
@@ -57,9 +56,10 @@ export function HubNav() {
                   key={t.id}
                   onClick={() => go(t.id)}
                   className={cn(
-                    "relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all",
+                    "relative flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all flex-shrink-0",
                     active ? "text-primary-foreground" : "text-muted-foreground hover:text-foreground"
                   )}
+                  aria-label={t.label}
                 >
                   {active && (
                     <motion.div
@@ -78,7 +78,7 @@ export function HubNav() {
           {view !== "home" && (
             <button
               onClick={() => go("home")}
-              className="hidden md:flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+              className="hidden lg:flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors flex-shrink-0"
             >
               <ChevronLeft className="h-4 w-4" />
               Back to hub

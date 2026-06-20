@@ -202,7 +202,7 @@ export function HandLabView() {
   }, [running]);
 
   return (
-    <div className="relative min-h-screen pt-20 pb-12">
+    <div className="relative min-h-screen pt-16 sm:pt-20 pb-12">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         {/* header */}
         <div className="mb-6 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
