@@ -240,14 +240,20 @@ export function SignTrainerView() {
     return a;
   };
 
-  const startQuiz = () => {
+  const startQuiz = (difficulty: "easy" | "medium" | "hard") => {
+    const config = {
+      easy: { count: 10, time: 90 },
+      medium: { count: 20, time: 60 },
+      hard: { count: 20, time: 30 },
+    }[difficulty];
     setMode("quiz");
-    quizOrderRef.current = shuffle(Array.from({ length: ASL.length }, (_, i) => i));
+    const allIndices = Array.from({ length: ASL.length }, (_, i) => i);
+    quizOrderRef.current = shuffle(allIndices).slice(0, config.count);
     quizIdxRef.current = 0;
     setQuizIdx(0);
     setQuizScore(0);
     setQuizTotal(quizOrderRef.current.length);
-    setQuizTimeLeft(60);
+    setQuizTimeLeft(config.time);
     setQuizFinished(false);
     setFeedback("none");
     holdStartRef.current = 0;
@@ -482,9 +488,21 @@ export function SignTrainerView() {
                   <button onClick={startPractice} className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:brightness-110 transition-all">
                     <GraduationCap className="h-4 w-4" /> Start Practice
                   </button>
-                  <button onClick={startQuiz} className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-chart-4/20 text-chart-4 text-sm font-medium hover:bg-chart-4/30 transition-all border border-chart-4/40">
-                    <Trophy className="h-4 w-4" /> Timed Quiz (60s)
-                  </button>
+                  <div className="text-[10px] text-muted-foreground uppercase tracking-wider pt-1">Timed Quiz</div>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    <button onClick={() => startQuiz("easy")} className="flex flex-col items-center gap-0.5 px-1 py-2 rounded-lg bg-primary/15 text-primary text-xs font-medium hover:bg-primary/25 transition-colors">
+                      <span className="font-bold">Easy</span>
+                      <span className="text-[9px] opacity-70">10 / 90s</span>
+                    </button>
+                    <button onClick={() => startQuiz("medium")} className="flex flex-col items-center gap-0.5 px-1 py-2 rounded-lg bg-chart-3/15 text-chart-3 text-xs font-medium hover:bg-chart-3/25 transition-colors">
+                      <span className="font-bold">Med</span>
+                      <span className="text-[9px] opacity-70">20 / 60s</span>
+                    </button>
+                    <button onClick={() => startQuiz("hard")} className="flex flex-col items-center gap-0.5 px-1 py-2 rounded-lg bg-destructive/15 text-destructive text-xs font-medium hover:bg-destructive/25 transition-colors">
+                      <span className="font-bold">Hard</span>
+                      <span className="text-[9px] opacity-70">20 / 30s</span>
+                    </button>
+                  </div>
                 </div>
               ) : mode === "practice" ? (
                 <div className="space-y-2">
@@ -497,8 +515,8 @@ export function SignTrainerView() {
                 <div className="space-y-3 text-center">
                   <div className="text-3xl font-bold text-gradient">{quizScore} / {quizTotal}</div>
                   <div className="text-xs text-muted-foreground">{quizScore === quizTotal ? "Perfect! 🏆" : quizScore >= quizTotal * 0.7 ? "Great job!" : quizScore >= quizTotal * 0.5 ? "Good effort!" : "Keep practicing!"}</div>
-                  <button onClick={startQuiz} className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-chart-4 text-white text-sm font-medium hover:brightness-110 transition-all">
-                    <RotateCcw className="h-4 w-4" /> Retry Quiz
+                  <button onClick={() => startQuiz("medium")} className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-chart-4 text-white text-sm font-medium hover:brightness-110 transition-all">
+                    <RotateCcw className="h-4 w-4" /> Retry (Medium)
                   </button>
                   <button onClick={stopQuiz} className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg glass text-sm font-medium hover:bg-white/10 transition-all">
                     Back to Browse

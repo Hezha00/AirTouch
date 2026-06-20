@@ -3,7 +3,7 @@
 import { motion } from "framer-motion";
 import {
   Hand, MousePointerClick, Volume2, Github, Download, ChevronRight,
-  Music, Sparkles, ArrowRight, Palette, Fingerprint, Piano as PianoIcon, Presentation, Languages,
+  Music, Sparkles, ArrowRight, Palette, Fingerprint, Piano as PianoIcon, Presentation, Languages, FileText,
 } from "lucide-react";
 import { useHub } from "@/lib/gesture/hub-context";
 import { cn } from "@/lib/utils";
@@ -28,6 +28,15 @@ const TOOLS = [
     glow: "from-cyan-500/30",
   },
   {
+    id: "whiteboard" as const,
+    icon: FileText,
+    title: "Air Whiteboard",
+    tagline: "A structured gesture whiteboard",
+    desc: "Multi-page whiteboard with pen, rectangle, circle, line, and arrow tools. Pinch to draw, open hand to lift, fist to clear. Six colors, adjustable size, PNG export per page.",
+    color: "text-chart-3",
+    glow: "from-amber-500/30",
+  },
+  {
     id: "orchestra" as const,
     icon: Music,
     title: "AI Conducting Orchestra",
@@ -41,7 +50,7 @@ const TOOLS = [
     icon: PianoIcon,
     title: "Gesture Piano",
     tagline: "Play a virtual piano in the air",
-    desc: "A 1.5-octave keyboard you play by pinching over the keys. Four instruments (piano/synth/bell/pluck), volume, octave shift, C-major scale highlighting, and record + playback.",
+    desc: "A 1.5-octave keyboard you play by pinching over the keys. Four instruments (piano/synth/bell/pluck), volume, octave shift, C-major scale highlighting, sustain pedal, and record + playback.",
     color: "text-chart-1",
     glow: "from-orange-500/30",
   },
@@ -59,7 +68,7 @@ const TOOLS = [
     icon: Languages,
     title: "Sign Language Trainer",
     tagline: "Learn the ASL alphabet",
-    desc: "An accessibility + education tool. Browse the ASL alphabet reference, or start practice mode and form each letter with your hand — live finger-pattern matching with a similarity meter and score.",
+    desc: "An accessibility + education tool. Browse 20 ASL letters, practice mode, or take a 60-second timed quiz. Live finger-pattern matching with a similarity meter and score.",
     color: "text-chart-5",
     glow: "from-violet-500/30",
   },

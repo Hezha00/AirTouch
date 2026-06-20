@@ -13,6 +13,7 @@ import { SectionDivider } from "@/components/sections/section-divider";
 import { CursorControlView } from "@/components/views/cursor-control-view";
 import { OrchestraView } from "@/components/views/orchestra-view";
 import { AirCanvasView } from "@/components/views/air-canvas-view";
+import { WhiteboardView } from "@/components/views/whiteboard-view";
 import { PianoView } from "@/components/views/piano-view";
 import { PresenterView } from "@/components/views/presenter-view";
 import { SignTrainerView } from "@/components/views/sign-trainer-view";
@@ -45,6 +46,7 @@ function AppShell() {
         {view === "cursor" && <CursorControlView />}
         {view === "orchestra" && <OrchestraView />}
         {view === "canvas" && <AirCanvasView />}
+        {view === "whiteboard" && <WhiteboardView />}
         {view === "piano" && <PianoView />}
         {view === "presenter" && <PresenterView />}
         {view === "sign" && <SignTrainerView />}

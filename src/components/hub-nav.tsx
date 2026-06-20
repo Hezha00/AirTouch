@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Hand, Home, MousePointer2, Music, Palette, Fingerprint,
-  Piano as PianoIcon, Presentation, Languages, ChevronLeft,
+  Piano as PianoIcon, Presentation, Languages, FileText, ChevronLeft,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useHub, type ViewName } from "@/lib/gesture/hub-context";
@@ -13,6 +13,7 @@ const TOOLS: { id: ViewName; label: string; icon: typeof Home }[] = [
   { id: "home", label: "Hub", icon: Home },
   { id: "cursor", label: "Cursor", icon: MousePointer2 },
   { id: "canvas", label: "Canvas", icon: Palette },
+  { id: "whiteboard", label: "Whiteboard", icon: FileText },
   { id: "orchestra", label: "Orchestra", icon: Music },
   { id: "piano", label: "Piano", icon: PianoIcon },
   { id: "presenter", label: "Presenter", icon: Presentation },
