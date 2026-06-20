@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Camera, CameraOff, Loader2, Hand, Trash2, Download,
+  Camera, CameraOff, Loader2, Hand, Trash2, Download, Undo2,
   Square, Circle, Minus, ArrowRight, Type, Pen, Eraser,
   ChevronLeft, ChevronRight, Plus, Sparkles, FileText,
 } from "lucide-react";
@@ -26,7 +26,8 @@ type Shape = {
   tool: Tool;
   color: string;
   size: number;
-  points: { x: number; y: number }[];
+  points: { x: number; y: number; label?: string }[];
+  fill?: boolean;
 };
 
 function isPinch(lm: Landmark[] | null): boolean {
@@ -71,6 +72,10 @@ export function WhiteboardView() {
   const [pageNum, setPageNum] = useState(0);
   const [pageCount, setPageCount] = useState(1);
   const [shapeCount, setShapeCount] = useState(0);
+  const [fill, setFill] = useState(false);
+  const [textValue, setTextValue] = useState("Text");
+  const fillRef = useRef(false);
+  const textRef = useRef("Text");
 
   /* redraw current page */
   const redraw = useCallback(() => {
@@ -105,13 +110,15 @@ export function WhiteboardView() {
       ctx.stroke();
     } else if (s.tool === "rect") {
       const [a, b] = [s.points[0], s.points[s.points.length - 1]];
-      ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
+      if (s.fill) ctx.fillRect(a.x, a.y, b.x - a.x, b.y - a.y);
+      else ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
     } else if (s.tool === "circle") {
       const [a, b] = [s.points[0], s.points[s.points.length - 1]];
       const r = Math.hypot(b.x - a.x, b.y - a.y);
       ctx.beginPath();
       ctx.arc(a.x, a.y, r, 0, Math.PI * 2);
-      ctx.stroke();
+      if (s.fill) ctx.fill();
+      else ctx.stroke();
     } else if (s.tool === "line") {
       const [a, b] = [s.points[0], s.points[s.points.length - 1]];
       ctx.beginPath();
@@ -209,11 +216,19 @@ export function WhiteboardView() {
         if (lx >= 0 && lx <= drect.width && ly >= 0 && ly <= drect.height) {
           if (!drawingRef.current) {
             // start new shape
-            currentShapeRef.current = { tool: toolRef.current, color: colorRef.current, size: sizeRef.current, points: [{ x: lx, y: ly }] };
-            pagesRef.current[pageNumRef.current].push(currentShapeRef.current);
-            drawingRef.current = true;
-            startPtRef.current = { x: lx, y: ly };
-            lastPtRef.current = { x: lx, y: ly };
+            if (toolRef.current === "text") {
+              // text tool: place text immediately
+              const textShape: Shape = { tool: "text", color: colorRef.current, size: sizeRef.current, points: [{ x: lx, y: ly, label: textRef.current }] };
+              pagesRef.current[pageNumRef.current].push(textShape);
+              setShapeCount(pagesRef.current[pageNumRef.current].length);
+              redraw();
+            } else {
+              currentShapeRef.current = { tool: toolRef.current, color: colorRef.current, size: sizeRef.current, points: [{ x: lx, y: ly }], fill: fillRef.current };
+              pagesRef.current[pageNumRef.current].push(currentShapeRef.current);
+              drawingRef.current = true;
+              startPtRef.current = { x: lx, y: ly };
+              lastPtRef.current = { x: lx, y: ly };
+            }
           } else {
             // continue shape
             if (currentShapeRef.current) {
@@ -276,7 +291,17 @@ export function WhiteboardView() {
   useEffect(() => { toolRef.current = tool; }, [tool]);
   useEffect(() => { colorRef.current = color; }, [color]);
   useEffect(() => { sizeRef.current = size; }, [size]);
+  useEffect(() => { fillRef.current = fill; }, [fill]);
+  useEffect(() => { textRef.current = textValue; }, [textValue]);
 
+  const undo = () => {
+    const page = pagesRef.current[pageNumRef.current];
+    if (page.length > 0) {
+      page.pop();
+      setShapeCount(page.length);
+      redraw();
+    }
+  };
   const clearPage = () => {
     pagesRef.current[pageNumRef.current] = [];
     setShapeCount(0);
@@ -317,7 +342,14 @@ export function WhiteboardView() {
     const rect = bc.getBoundingClientRect();
     const lx = e.clientX - rect.left;
     const ly = e.clientY - rect.top;
-    currentShapeRef.current = { tool, color, size, points: [{ x: lx, y: ly }] };
+    if (tool === "text") {
+      const textShape: Shape = { tool: "text", color, size, points: [{ x: lx, y: ly, label: textValue }] };
+      pagesRef.current[pageNumRef.current].push(textShape);
+      setShapeCount(pagesRef.current[pageNumRef.current].length);
+      redraw();
+      return;
+    }
+    currentShapeRef.current = { tool, color, size, points: [{ x: lx, y: ly }], fill };
     pagesRef.current[pageNumRef.current].push(currentShapeRef.current);
     drawingRef.current = true;
     startPtRef.current = { x: lx, y: ly };
@@ -351,6 +383,7 @@ export function WhiteboardView() {
     { id: "circle", icon: Circle, label: "Circle" },
     { id: "line", icon: Minus, label: "Line" },
     { id: "arrow", icon: ArrowRight, label: "Arrow" },
+    { id: "text", icon: Type, label: "Text" },
     { id: "eraser", icon: Eraser, label: "Eraser" },
   ];
 
@@ -470,7 +503,10 @@ export function WhiteboardView() {
 
             {/* page actions */}
             <div className="rounded-xl glass-strong p-4 col-span-2 lg:col-span-1 space-y-2">
-              <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Pages</div>
+              <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Actions</div>
+              <button onClick={undo} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-white/5 text-sm hover:bg-white/10 transition-colors">
+                <Undo2 className="h-4 w-4" /> Undo
+              </button>
               <button onClick={newPage} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-white/5 text-sm hover:bg-white/10 transition-colors">
                 <Plus className="h-4 w-4" /> New page
               </button>
@@ -480,6 +516,28 @@ export function WhiteboardView() {
               <button onClick={download} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/15 text-primary text-sm hover:bg-primary/25 transition-colors">
                 <Download className="h-4 w-4" /> Save PNG
               </button>
+            </div>
+
+            {/* fill toggle + text input */}
+            <div className="rounded-xl glass-strong p-4 col-span-2 lg:col-span-1 space-y-3">
+              <div>
+                <div className="text-xs text-muted-foreground uppercase tracking-wider mb-2">Shape fill</div>
+                <button onClick={() => setFill((f) => !f)} className={cn("w-full px-3 py-2 rounded-lg text-xs font-medium transition-colors", fill ? "bg-primary/15 text-primary" : "bg-white/5 text-muted-foreground")}>
+                  {fill ? "FILLED" : "OUTLINED"}
+                </button>
+              </div>
+              {tool === "text" && (
+                <div>
+                  <div className="text-xs text-muted-foreground uppercase tracking-wider mb-2">Text content</div>
+                  <input
+                    type="text"
+                    value={textValue}
+                    onChange={(e) => setTextValue(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg bg-black/30 border border-white/10 text-sm text-foreground focus:outline-none focus:border-primary/50"
+                    placeholder="Type here..."
+                  />
+                </div>
+              )}
             </div>
 
             {/* gesture guide */}

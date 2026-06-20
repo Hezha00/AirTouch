@@ -6,7 +6,7 @@ AirTouch is a **browser-based gesture-recognition hub** with **8 interactive too
 
 The Python desktop app still lives in `/gesture-control/` as the downloadable backend.
 
-**This phase**: Added an 8th tool — **Air Whiteboard** (multi-page gesture whiteboard with shapes, arrows, PNG export) — and added **quiz difficulty levels** (Easy/Medium/Hard) to the Sign Language Trainer. Brings the hub from 7 to 8 tools.
+**This phase**: Enhanced the **Air Whiteboard** with an undo button, a text tool (type + place), and a shape-fill toggle (filled vs outlined for rect/circle). These complete the whiteboard's core feature set (priorities #6 and #7 from the previous worklog).
 
 ## Architecture
 
@@ -34,26 +34,25 @@ The Python desktop app still lives in `/gesture-control/` as the downloadable ba
 
 ## Completed this phase
 
-1. **Air Whiteboard** (`whiteboard-view.tsx`) — an 8th tool:
-   - **Multi-page whiteboard** with pen, rectangle, circle, line, arrow, and eraser tools.
-   - Pinch to draw, open hand to lift, fist to clear the current page.
-   - Shape tools keep a start point + current point for live preview while drawing.
-   - Arrow tool draws a line + arrowhead.
-   - 6 colors, adjustable size (2–20px), page navigation (prev/next/new page), PNG export per page.
-   - Mouse drawing fallback (no camera needed to test).
-   - Camera thumbnail with skeleton overlay + live gesture badge; sidebar with tools, colors, size, page actions, gesture guide, shape counter.
-2. **Sign Trainer quiz difficulty levels** (`sign-trainer-view.tsx`):
-   - Replaced the single "Timed Quiz (60s)" button with three difficulty buttons: **Easy** (10 letters, 90s), **Medium** (20 letters, 60s), **Hard** (20 letters, 30s).
-   - Each difficulty shuffles a random subset of letters and sets the countdown accordingly.
-   - Retry button defaults to Medium difficulty.
-3. **Home page updated** — hero now showcases all 8 tools in a `lg:grid-cols-3 xl:grid-cols-4` grid (clean 4×2 wrap at desktop). Nav expanded to 9 tabs (Hub/Cursor/Canvas/Whiteboard/Orchestra/Piano/Presenter/Sign/Hand Lab).
-4. **Verified** — ESLint clean, page returns 200, agent-browser confirms all 9 views render; whiteboard shows tools + colors + page nav + canvas; sign trainer shows Easy/Med/Hard difficulty buttons.
+1. **Whiteboard undo button** (`whiteboard-view.tsx`):
+   - New "Undo" button in the Actions section — pops the last shape off the current page and redraws.
+   - Works with both gesture and mouse drawing.
+2. **Whiteboard text tool** (`whiteboard-view.tsx`):
+   - New "Text" tool added to the tools grid (7 tools now: Pen/Rect/Circle/Line/Arrow/Text/Eraser).
+   - When the Text tool is selected, a "Text content" input appears in the sidebar — type your text, then click/pinch on the canvas to place it.
+   - Text is rendered in the selected color at `size * 6`px font size.
+   - Works with both mouse click and gesture pinch.
+3. **Whiteboard shape fill toggle** (`whiteboard-view.tsx`):
+   - New "Shape fill" section with an "OUTLINED" / "FILLED" toggle button.
+   - When FILLED, rectangles and circles are drawn filled instead of outlined.
+   - Fill state is stored per-shape, so toggling after drawing doesn't affect existing shapes.
+4. **Verified** — ESLint clean, page returns 200, agent-browser confirms all 9 views render; whiteboard shows 7 tools + Undo button + OUTLINED toggle + Text input when Text tool selected.
 
 ## Verification results
 
 - `bun run lint` → clean (no errors/warnings).
 - Dev server: `GET / 200`, no compile errors.
-- agent-browser visual QA at 1440×900: whiteboard (heading + camera thumbnail + large canvas + page indicator + tools sidebar with Pen/Rect/Circle/Line/Arrow/Eraser + colors + size + page actions + gesture guide + counter) all render correctly; sign trainer shows Easy/Med/Hard difficulty buttons.
+- agent-browser visual QA at 1440×900: whiteboard (7 tools including Text, Actions section with Undo/New/Clear/Save, Shape fill OUTLINED toggle, page indicator, colors palette) all render correctly.
 - All 9 views navigate correctly.
 
 ## Unresolved issues / risks
@@ -70,5 +69,5 @@ The Python desktop app still lives in `/gesture-control/` as the downloadable ba
 3. **Tablet (768px) fine-tune** — the views stack at `lg` (1024px); a dedicated tablet pass could keep camera + sidebar side-by-side a bit longer with tighter spacing.
 4. **Presenter: custom deck upload** — let users load their own slide images / Markdown instead of the built-in sample deck.
 5. **Sign Trainer: J and S letters** — add motion-based detection for J (swipe) and S (thumb-across-fist) to complete the full 26-letter alphabet.
-6. **Whiteboard: text tool + undo** — implement the text tool (tap to place, type via keyboard) and an undo button.
-7. **Whiteboard: shape fill** — add a fill toggle for rect/circle (filled vs outlined).
+6. **Whiteboard: selection/move tool** — add a select tool to pick up existing shapes and move them.
+7. **Whiteboard: redo + keyboard shortcuts** — add a redo button and Ctrl+Z / Ctrl+Y keyboard shortcuts.
