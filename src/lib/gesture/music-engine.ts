@@ -3,42 +3,39 @@ import * as Tone from "tone";
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
-export type LayerName = "strings" | "piano" | "bass" | "drums";
+export type LayerName = "strings" | "piano" | "bass" | "drums" | "lead";
 
 export type MusicState = {
-  tempo: number;            // BPM
-  intensity: number;        // 0..1
+  tempo: number;
+  intensity: number;          // 0..1 discrete-ish
   activeLayers: LayerName[];
   currentChordIndex: number;
   currentChordName: string;
+  scaleName: string;
+  progressionName: string;
+  melodyDegree: number;       // 0..6 scale degree
+  melodyNote: string;
+  dynamic: string;            // pp..ff
 };
 
 /* ------------------------------------------------------------------ */
-/*  Harmony: C major scale + chord progressions                        */
+/*  Scales (semitone offsets from root) + diatonic triad builder       */
 /* ------------------------------------------------------------------ */
-// Note: Tone.js uses note names. We build chords from scale degrees.
-// C major scale notes
-const SCALE_ROOT = "C4";
-// chord progressions (root + quality), as scale-degree semitone offsets
-// We define each chord as a root MIDI note + triad intervals.
-type Chord = { name: string; root: number; type: "maj" | "min" };
+type Scale = { name: string; root: number; intervals: number[] };
 
-const PROGRESSIONS: Chord[][] = [
-  // C → Am → F → G
-  [
-    { name: "C",  root: 60, type: "maj" },
-    { name: "Am", root: 57, type: "min" },
-    { name: "F",  root: 65, type: "maj" },
-    { name: "G",  root: 67, type: "maj" },
-  ],
-  // F → G → Am → C
-  [
-    { name: "F",  root: 65, type: "maj" },
-    { name: "G",  root: 67, type: "maj" },
-    { name: "Am", root: 57, type: "min" },
-    { name: "C",  root: 60, type: "maj" },
-  ],
+export const SCALES: Scale[] = [
+  { name: "C Major",       root: 60, intervals: [0, 2, 4, 5, 7, 9, 11] },
+  { name: "A Minor",       root: 57, intervals: [0, 2, 3, 5, 7, 8, 10] },
+  { name: "D Dorian",      root: 62, intervals: [0, 2, 3, 5, 7, 9, 10] },
+  { name: "C Pentatonic",  root: 60, intervals: [0, 2, 4, 7, 9] },
 ];
+
+function noteAtDegree(scale: Scale, degree: number, octaveShift = 0): number {
+  const n = scale.intervals.length;
+  const idx = ((degree % n) + n) % n;
+  const oct = Math.floor(degree / n) + octaveShift;
+  return scale.root + scale.intervals[idx] + oct * 12;
+}
 
 function midiToNote(midi: number): string {
   const names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
@@ -46,58 +43,85 @@ function midiToNote(midi: number): string {
   return names[midi % 12] + octave;
 }
 
-function chordNotes(chord: Chord, octaveOffset = 0): string[] {
-  const root = chord.root + octaveOffset * 12;
-  const third = chord.type === "maj" ? root + 4 : root + 3;
-  const fifth = root + 7;
-  return [midiToNote(root), midiToNote(third), midiToNote(fifth)];
+// diatonic triad on a scale degree (stack thirds within the scale)
+function triad(scale: Scale, degree: number, octaveShift = 0): string[] {
+  const n = scale.intervals.length;
+  return [
+    midiToNote(noteAtDegree(scale, degree, octaveShift)),
+    midiToNote(noteAtDegree(scale, degree + 2, octaveShift)),
+    midiToNote(noteAtDegree(scale, degree + 4, octaveShift)),
+  ];
 }
+
+/* ------------------------------------------------------------------ */
+/*  Progressions (scale-degree based, work in any scale)               */
+/* ------------------------------------------------------------------ */
+type Progression = { name: string; degrees: number[] };
+
+export const PROGRESSIONS: Progression[] = [
+  { name: "Pop",        degrees: [0, 4, 5, 3] },   // I – V – vi – IV
+  { name: "Cinematic",  degrees: [0, 5, 3, 4] },   // I – vi – IV – V
+  { name: "Dramatic",   degrees: [5, 3, 0, 4] },   // vi – IV – I – V
+  { name: "Anthem",     degrees: [0, 3, 4, 0] },   // I – IV – V – I
+];
+
+const ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII"];
 
 /* ------------------------------------------------------------------ */
 /*  MusicEngine                                                        */
 /* ------------------------------------------------------------------ */
 export class MusicEngine {
-  private progression: Chord[] = PROGRESSIONS[0];
+  private scale: Scale = SCALES[0];
+  private progression: Progression = PROGRESSIONS[0];
   private chordIndex = 0;
   private barCount = 0;
+  private octaveShift = 0;
+  private swing = 0;
+  private dynamicLevel = 3; // 0..5 (pp..ff)
+  private readonly DYNAMICS = ["pp", "p", "mp", "mf", "f", "ff"];
+  private readonly DYN_VEL  = [0.30, 0.45, 0.60, 0.75, 0.90, 1.00];
 
   // instruments
   private strings!: Tone.PolySynth;
   private piano!: Tone.PolySynth;
   private bass!: Tone.MonoSynth;
+  private lead!: Tone.MonoSynth;
   private kick!: Tone.MembraneSynth;
   private snare!: Tone.NoiseSynth;
   private hihat!: Tone.MetalSynth;
 
-  // gain nodes (per layer)
-  private stringsGain!: Tone.Gain;
-  private pianoGain!: Tone.Gain;
-  private bassGain!: Tone.Gain;
-  private drumsGain!: Tone.Gain;
+  // gains
+  private layerGains!: Record<LayerName, Tone.Gain>;
   private masterGain!: Tone.Gain;
-
-  // reverb for cinematic space
   private reverb!: Tone.Reverb;
+  private delay!: Tone.FeedbackDelay;
 
-  // loop handles
+  // loops
   private chordLoop!: Tone.Loop;
-  private drumLoop!: Tone.Loop;
-  private bassLoop!: Tone.Loop;
   private pianoLoop!: Tone.Loop;
+  private bassLoop!: Tone.Loop;
+  private drumLoop!: Tone.Loop;
+  private melodyLoop!: Tone.Loop;
 
   private started = false;
   private layersEnabled: Record<LayerName, boolean> = {
-    strings: true, piano: true, bass: true, drums: true,
+    strings: true, piano: true, bass: true, drums: true, lead: true,
   };
   private locked = false;
+  private melodyEnabled = true;
+  private melodyDegree = 0;
 
-  // current state for external reads
   state: MusicState = {
     tempo: 90,
-    intensity: 0.4,
-    activeLayers: ["strings", "piano", "bass", "drums"],
+    intensity: 0.5,
+    activeLayers: ["strings", "piano", "bass", "drums", "lead"],
     currentChordIndex: 0,
-    currentChordName: "C",
+    currentChordName: "I",
+    scaleName: "C Major",
+    progressionName: "Pop",
+    melodyDegree: 0,
+    melodyNote: "C4",
+    dynamic: "mf",
   };
 
   /* -------------------------------------------------------------- */
@@ -105,114 +129,132 @@ export class MusicEngine {
     if (this.started) return;
     await Tone.start();
 
-    // master chain
     this.masterGain = new Tone.Gain(0.8).toDestination();
-    this.reverb = new Tone.Reverb({ decay: 4, wet: 0.35 }).connect(this.masterGain);
+    this.reverb = new Tone.Reverb({ decay: 5, wet: 0.3 }).connect(this.masterGain);
+    this.delay = new Tone.FeedbackDelay({ delayTime: "8n", feedback: 0.25, wet: 0.15 }).connect(this.reverb);
 
-    // per-layer gains
-    this.stringsGain = new Tone.Gain(0.5).connect(this.reverb);
-    this.pianoGain = new Tone.Gain(0.6).connect(this.reverb);
-    this.bassGain = new Tone.Gain(0.7).connect(this.masterGain);
-    this.drumsGain = new Tone.Gain(0.7).connect(this.masterGain);
+    const makeGain = (v: number) => new Tone.Gain(v).connect(this.reverb);
+    this.layerGains = {
+      strings: makeGain(0.5),
+      piano: makeGain(0.6),
+      bass: new Tone.Gain(0.7).connect(this.masterGain),
+      drums: new Tone.Gain(0.7).connect(this.masterGain),
+      lead: makeGain(0.55),
+    };
 
-    // strings — warm pad
     this.strings = new Tone.PolySynth(Tone.Synth, {
       oscillator: { type: "sawtooth" },
       envelope: { attack: 0.8, decay: 0.3, sustain: 0.8, release: 2.5 },
       volume: -14,
-    }).connect(this.stringsGain);
+    }).connect(this.layerGains.strings);
 
-    // piano — triangle pluck
     this.piano = new Tone.PolySynth(Tone.Synth, {
       oscillator: { type: "triangle" },
       envelope: { attack: 0.005, decay: 0.4, sustain: 0.2, release: 1.2 },
-      volume: -12,
-    }).connect(this.pianoGain);
+      volume: -10,
+    }).connect(this.layerGains.piano);
 
-    // bass — mono synth
     this.bass = new Tone.MonoSynth({
       oscillator: { type: "sine" },
       envelope: { attack: 0.02, decay: 0.2, sustain: 0.6, release: 0.5 },
       filterEnvelope: { attack: 0.02, decay: 0.2, sustain: 0.5, release: 0.5, baseFrequency: 200, octaves: 2.5 },
       volume: -10,
-    }).connect(this.bassGain);
+    }).connect(this.layerGains.bass);
 
-    // drums
+    this.lead = new Tone.MonoSynth({
+      oscillator: { type: "square" },
+      envelope: { attack: 0.01, decay: 0.2, sustain: 0.3, release: 0.6 },
+      filterEnvelope: { attack: 0.01, decay: 0.2, sustain: 0.3, release: 0.4, baseFrequency: 800, octaves: 3 },
+      volume: -12,
+    }).connect(this.layerGains.lead);
+    this.lead.connect(this.delay);
+
     this.kick = new Tone.MembraneSynth({
       pitchDecay: 0.05, octaves: 6, envelope: { attack: 0.001, decay: 0.4, sustain: 0 },
       volume: -6,
-    }).connect(this.drumsGain);
-
+    }).connect(this.layerGains.drums);
     this.snare = new Tone.NoiseSynth({
       noise: { type: "white" },
       envelope: { attack: 0.001, decay: 0.2, sustain: 0 },
       volume: -12,
-    }).connect(this.drumsGain);
-
+    }).connect(this.layerGains.drums);
     this.hihat = new Tone.MetalSynth({
       envelope: { attack: 0.001, decay: 0.1, release: 0.01 },
       harmonicity: 5.1, modulationIndex: 32, resonance: 4000, octaves: 1.5,
       volume: -22,
-    }).connect(this.drumsGain);
+    }).connect(this.layerGains.drums);
 
     Tone.Transport.bpm.value = this.state.tempo;
+    Tone.Transport.swing = this.swing;
+    Tone.Transport.swingSubdivision = "16n";
 
-    // ---- scheduling ----
-    // Chord changes every 2 bars (a "phrase")
+    // chord changes every 2 bars
     this.chordLoop = new Tone.Loop((time) => {
       if (this.locked) return;
-      const chord = this.progression[this.chordIndex];
-      // strings: sustain the chord
-      const notes = chordNotes(chord, 0);
-      this.strings.triggerAttackRelease(notes, "2m", time);
-      this.state.currentChordName = chord.name;
+      const deg = this.progression.degrees[this.chordIndex];
+      const notes = triad(this.scale, deg, this.octaveShift);
+      if (this.layersEnabled.strings) {
+        this.strings.triggerAttackRelease(notes, "2m", time, this.dynVel());
+      }
+      this.state.currentChordName = ROMAN[deg % 7] || "I";
       this.state.currentChordIndex = this.chordIndex;
     }, "2m").start(0);
 
-    // advance chord every 2 bars
     Tone.Transport.scheduleRepeat((time) => {
       if (this.locked) return;
       this.barCount++;
       if (this.barCount % 2 === 0) {
-        this.chordIndex = (this.chordIndex + 1) % this.progression.length;
+        this.chordIndex = (this.chordIndex + 1) % this.progression.degrees.length;
       }
     }, "1m");
 
-    // Piano: rhythmic stabs on the chord
+    // piano stabs on the chord
+    let pianoStep = 0;
     this.pianoLoop = new Tone.Loop((time) => {
       if (!this.layersEnabled.piano) return;
-      const chord = this.progression[this.chordIndex];
-      const notes = chordNotes(chord, 0);
-      // play a short stab every quarter
-      const idx = Math.floor((Tone.Transport.position as any).split(":")[1]) % notes.length;
-      this.piano.triggerAttackRelease(notes[idx], "8n", time, 0.5 + this.state.intensity * 0.4);
+      const deg = this.progression.degrees[this.chordIndex];
+      const notes = triad(this.scale, deg, this.octaveShift);
+      const idx = pianoStep % notes.length;
+      this.piano.triggerAttackRelease(notes[idx], "8n", time, this.dynVel());
+      pianoStep++;
     }, "4n").start("8n");
 
-    // Bass: root note on beat 1 and 3
+    // bass on root
     this.bassLoop = new Tone.Loop((time) => {
       if (!this.layersEnabled.bass) return;
-      const chord = this.progression[this.chordIndex];
-      const root = midiToNote(chord.root - 12); // one octave down
-      this.bass.triggerAttackRelease(root, "4n", time);
+      const deg = this.progression.degrees[this.chordIndex];
+      const root = midiToNote(noteAtDegree(this.scale, deg, this.octaveShift) - 12);
+      this.bass.triggerAttackRelease(root, "4n", time, this.dynVel());
     }, "2n").start(0);
 
-    // Drums: kick on 1,3 ; snare on 2,4 ; hihat on 8ths
+    // drums
     let beat = 0;
     this.drumLoop = new Tone.Loop((time) => {
       if (!this.layersEnabled.drums) return;
       const b = beat % 4;
-      if (b === 0 || b === 2) {
-        this.kick.triggerAttackRelease("C1", "8n", time, 0.8 + this.state.intensity * 0.2);
-      }
-      if (b === 1 || b === 3) {
-        this.snare.triggerAttackRelease("8n", time, 0.5 + this.state.intensity * 0.4);
-      }
-      // hihat every 8th
-      this.hihat.triggerAttackRelease("C5", "32n", time, 0.3 + this.state.intensity * 0.4);
+      const v = this.dynVel();
+      if (b === 0 || b === 2) this.kick.triggerAttackRelease("C1", "8n", time, 0.8 + v * 0.2);
+      if (b === 1 || b === 3) this.snare.triggerAttackRelease("8n", time, 0.5 + v * 0.4);
+      this.hihat.triggerAttackRelease("C5", "32n", time, 0.3 + v * 0.4);
       beat++;
     }, "4n").start(0);
 
+    // melody: play the selected scale degree every 8th
+    this.melodyLoop = new Tone.Loop((time) => {
+      if (!this.layersEnabled.lead || !this.melodyEnabled) return;
+      const n = noteAtDegree(this.scale, this.melodyDegree, this.octaveShift + 1);
+      const note = midiToNote(n);
+      this.lead.triggerAttackRelease(note, "8n", time, this.dynVel() * 0.9);
+      this.state.melodyNote = note;
+      this.state.melodyDegree = this.melodyDegree;
+    }, "8n").start("4n");
+
     this.started = true;
+  }
+
+  /* -------------------------------------------------------------- */
+  private dynVel(): number {
+    return this.DYN_VEL[this.dynamicLevel];
   }
 
   /* -------------------------------------------------------------- */
@@ -220,7 +262,6 @@ export class MusicEngine {
     if (!this.started) return;
     Tone.Transport.start();
   }
-
   stop() {
     if (!this.started) return;
     Tone.Transport.stop();
@@ -228,51 +269,96 @@ export class MusicEngine {
     this.piano.releaseAll();
   }
 
-  /* -------------------------------------------------------------- */
-  // tempo (60..180)
   setTempo(bpm: number) {
-    const t = Math.max(60, Math.min(180, Math.round(bpm)));
+    const t = Math.max(50, Math.min(200, Math.round(bpm)));
     this.state.tempo = t;
-    Tone.Transport.bpm.rampTo(t, 0.4);
+    Tone.Transport.bpm.rampTo(t, 0.5);
   }
 
-  // intensity 0..1 -> affects velocity + reverb wet
-  setIntensity(v: number) {
-    const i = Math.max(0, Math.min(1, v));
-    this.state.intensity = i;
-    // map intensity to master gain a touch + reverb wet
-    this.reverb.wet.rampTo(0.25 + i * 0.3, 0.5);
+  // discrete dynamic level 0..5
+  setDynamicLevel(level: number) {
+    this.dynamicLevel = Math.max(0, Math.min(5, Math.round(level)));
+    this.state.dynamic = this.DYNAMICS[this.dynamicLevel];
+    this.state.intensity = this.dynamicLevel / 5;
+    // reverb wetness scales with dynamics
+    this.reverb.wet.rampTo(0.2 + (this.dynamicLevel / 5) * 0.35, 0.6);
+    // delay wet too
+    this.delay.wet.rampTo(0.08 + (this.dynamicLevel / 5) * 0.18, 0.6);
   }
 
-  // layer enable/disable
+  setScale(idx: number) {
+    const s = SCALES[Math.max(0, Math.min(SCALES.length - 1, idx))];
+    this.scale = s;
+    this.state.scaleName = s.name;
+  }
+
+  setProgression(idx: number) {
+    const p = PROGRESSIONS[Math.max(0, Math.min(PROGRESSIONS.length - 1, idx))];
+    this.progression = p;
+    this.chordIndex = 0;
+    this.state.progressionName = p.name;
+  }
+
+  setMelodyDegree(degree: number) {
+    const n = this.scale.intervals.length;
+    this.melodyDegree = Math.max(0, Math.min(n * 2 - 1, Math.round(degree)));
+    this.state.melodyDegree = this.melodyDegree;
+  }
+
+  setMelodyEnabled(on: boolean) {
+    this.melodyEnabled = on;
+  }
+
   setLayer(name: LayerName, enabled: boolean) {
     this.layersEnabled[name] = enabled;
-    const gain = { strings: this.stringsGain, piano: this.pianoGain, bass: this.bassGain, drums: this.drumsGain }[name];
-    gain.gain.rampTo(enabled ? 0.6 : 0, 0.2);
+    this.layerGains[name].gain.rampTo(enabled ? this.layerGains[name].gain.value || 0.6 : 0, 0.2);
+    // fix: re-set a sensible default if disabling
+    if (enabled && this.layerGains[name].gain.value === 0) {
+      this.layerGains[name].gain.rampTo(0.6, 0.2);
+    }
     this.state.activeLayers = (Object.keys(this.layersEnabled) as LayerName[]).filter((k) => this.layersEnabled[k]);
   }
 
-  // mix: 0..1 left=strings, 0.5=piano, 1=choir/pads (we boost strings on left, piano center)
-  setMix(mix: number) {
-    // strings louder on the left (mix<0.5), piano louder center
-    const stringsVol = 0.3 + (1 - Math.min(mix * 2, 1)) * 0.5;
-    const pianoVol = 0.3 + (1 - Math.abs(mix - 0.5) * 2) * 0.5;
-    this.stringsGain.gain.rampTo(this.layersEnabled.strings ? stringsVol : 0, 0.3);
-    this.pianoGain.gain.rampTo(this.layersEnabled.piano ? pianoVol : 0, 0.3);
+  setLayerVolume(name: LayerName, vol: number) {
+    // vol 0..1
+    this.layersEnabled[name] = vol > 0.01;
+    this.layerGains[name].gain.rampTo(vol, 0.15);
+    this.state.activeLayers = (Object.keys(this.layersEnabled) as LayerName[]).filter((k) => this.layersEnabled[k] && this.layerGains[k].gain.value > 0.01);
   }
 
-  // lock/freeze the current chord progression
+  setReverb(amount: number) {
+    this.reverb.wet.rampTo(Math.max(0, Math.min(1, amount)), 0.3);
+  }
+
+  setSwing(amount: number) {
+    this.swing = Math.max(0, Math.min(1, amount));
+    Tone.Transport.swing = this.swing;
+  }
+
+  setOctave(shift: number) {
+    this.octaveShift = Math.max(-2, Math.min(2, Math.round(shift)));
+  }
+
   setLocked(locked: boolean) {
     this.locked = locked;
   }
 
-  // solo: only the named layer audible
-  solo(name: LayerName | null) {
-    (["strings", "piano", "bass", "drums"] as LayerName[]).forEach((l) => {
-      const gain = { strings: this.stringsGain, piano: this.pianoGain, bass: this.bassGain, drums: this.drumsGain }[l];
-      const audible = name === null ? this.layersEnabled[l] : (l === name);
-      gain.gain.rampTo(audible ? 0.6 : 0, 0.2);
+  // big build-up + drop
+  triggerDrop() {
+    if (!this.started) return;
+    // ramp tempo up slightly + bring all layers in
+    const targetTempo = Math.min(180, this.state.tempo + 20);
+    Tone.Transport.bpm.rampTo(targetTempo, 2);
+    (Object.keys(this.layersEnabled) as LayerName[]).forEach((l) => {
+      this.layersEnabled[l] = true;
+      this.layerGains[l].gain.rampTo(0.6, 1.5);
     });
+    this.dynamicLevel = 5;
+    this.setDynamicLevel(5);
+    // a dramatic hit
+    const deg = this.progression.degrees[this.chordIndex];
+    const notes = triad(this.scale, deg, this.octaveShift);
+    this.strings.triggerAttackRelease(notes, "2n", undefined, 1);
   }
 
   dispose() {
@@ -282,13 +368,16 @@ export class MusicEngine {
     this.pianoLoop.dispose();
     this.bassLoop.dispose();
     this.drumLoop.dispose();
+    this.melodyLoop.dispose();
     this.strings.dispose();
     this.piano.dispose();
     this.bass.dispose();
+    this.lead.dispose();
     this.kick.dispose();
     this.snare.dispose();
     this.hihat.dispose();
     this.reverb.dispose();
+    this.delay.dispose();
     this.masterGain.dispose();
     this.started = false;
   }

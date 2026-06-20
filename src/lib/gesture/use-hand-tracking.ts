@@ -12,9 +12,11 @@ export type GestureType = "open" | "fist" | "pinch" | "point" | "idle";
 export type HandState = {
   x: number;          // 0..1, mirrored so it feels natural
   y: number;          // 0..1
-  velocity: number;   // 0..1 normalised speed
+  velocity: number;   // 0..1 normalised speed (kept for legacy use, but
+                      // downstream code should prefer position/gesture)
   gesture: GestureType;
   present: boolean;
+  handedness: "Left" | "Right" | "Unknown";
 };
 
 export type LandmarkerHandle = {
@@ -25,7 +27,7 @@ export type LandmarkerHandle = {
 };
 
 const DEFAULT_HAND: HandState = {
-  x: 0.5, y: 0.5, velocity: 0, gesture: "idle", present: false,
+  x: 0.5, y: 0.5, velocity: 0, gesture: "idle", present: false, handedness: "Unknown",
 };
 
 /* ------------------------------------------------------------------ */
@@ -53,14 +55,10 @@ function classifyGesture(lm: Landmark[]): GestureType {
   const st = fingerStates(lm);
   const [thumb, index, middle, ring, pinky] = st;
   const ref = refSize(lm);
-  // pinch: thumb tip close to index tip
   const di = dist(lm[4], lm[8]) / ref;
   if (di < 0.4 && !middle && !ring && !pinky && thumb) return "pinch";
-  // open hand
   if (thumb && index && middle && ring && pinky) return "open";
-  // point: index only
   if (index && !middle && !ring && !pinky) return "point";
-  // fist: all folded
   if (!index && !middle && !ring && !pinky) return "fist";
   return "idle";
 }
@@ -71,24 +69,30 @@ function classifyGesture(lm: Landmark[]): GestureType {
 export function useHandTracking(opts?: {
   smoothing?: number;        // EMA alpha for x,y (default 0.4)
   velSmoothing?: number;     // EMA alpha for velocity (default 0.5)
-  onFrame?: (h: HandState, lm: Landmark[] | null) => void;
+  numHands?: number;         // 1 (default) or 2
+  onFrame?: (h: HandState, lm: Landmark[] | null) => void;       // primary hand
+  onHands?: (hands: HandState[], lms: (Landmark[] | null)[]) => void; // all hands
 }) {
   const smoothing = opts?.smoothing ?? 0.4;
   const velSmoothing = opts?.velSmoothing ?? 0.5;
+  const numHands = opts?.numHands ?? 1;
   const onFrameRef = useRef(opts?.onFrame);
+  const onHandsRef = useRef(opts?.onHands);
   onFrameRef.current = opts?.onFrame;
+  onHandsRef.current = opts?.onHands;
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const landmarkerRef = useRef<LandmarkerHandle | null>(null);
   const rafRef = useRef<number>(0);
   const lastVideoTimeRef = useRef(-1);
-  const emaRef = useRef<{ x: number; y: number; v: number } | null>(null);
-  const prevPosRef = useRef<{ x: number; y: number; t: number } | null>(null);
+  // per-hand EMA state (keyed by hand index in detection order)
+  const emaRefs = useRef<({ x: number; y: number; v: number } | null)[]>([null, null]);
+  const prevPosRefs = useRef<({ x: number; y: number; t: number } | null)[]>([null, null]);
 
   const [running, setRunning] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [hand, setHand] = useState<HandState>(DEFAULT_HAND);
+  const [hands, setHands] = useState<HandState[]>([]);
 
   const loadLandmarker = useCallback(async () => {
     if (landmarkerRef.current) return landmarkerRef.current;
@@ -103,14 +107,14 @@ export function useHandTracking(opts?: {
         delegate: "GPU",
       },
       runningMode: "VIDEO",
-      numHands: 1,
+      numHands,
       minHandDetectionConfidence: 0.6,
       minHandPresenceConfidence: 0.6,
       minTrackingConfidence: 0.6,
     });
     landmarkerRef.current = landmarker as unknown as LandmarkerHandle;
     return landmarkerRef.current;
-  }, []);
+  }, [numHands]);
 
   const loop = useCallback(() => {
     const video = videoRef.current;
@@ -120,62 +124,77 @@ export function useHandTracking(opts?: {
     if (video.readyState >= 2 && video.currentTime !== lastVideoTimeRef.current) {
       lastVideoTimeRef.current = video.currentTime;
       const result = landmarker.detectForVideo(video, performance.now());
-      const hands = result.landmarks || [];
+      const detected = result.landmarks || [];
+      const handednesses = result.handedness || [];
 
-      if (hands.length > 0) {
-        const lm = hands[0];
-        // use palm center (avg of MCPs) for stable position
+      const outHands: HandState[] = [];
+      const outLms: (Landmark[] | null)[] = [];
+
+      for (let i = 0; i < numHands; i++) {
+        const lm = detected[i];
+        if (!lm) {
+          emaRefs.current[i] = null;
+          prevPosRefs.current[i] = null;
+          outHands.push({ ...DEFAULT_HAND });
+          outLms.push(null);
+          continue;
+        }
         const px = (lm[5].x + lm[9].x + lm[13].x + lm[17].x) / 4;
         const py = (lm[5].y + lm[9].y + lm[13].y + lm[17].y) / 4;
-        // mirror x for natural feel
         const mx = 1 - px;
         const my = py;
 
-        // velocity (normalised per second)
         const now = performance.now();
         let instVel = 0;
-        if (prevPosRef.current) {
-          const dt = (now - prevPosRef.current.t) / 1000;
+        if (prevPosRefs.current[i]) {
+          const dt = (now - prevPosRefs.current[i].t) / 1000;
           if (dt > 0) {
-            const dx = mx - prevPosRef.current.x;
-            const dy = my - prevPosRef.current.y;
+            const dx = mx - prevPosRefs.current[i].x;
+            const dy = my - prevPosRefs.current[i].y;
             instVel = Math.min(1, Math.hypot(dx, dy) / dt / 1.5);
           }
         }
-        prevPosRef.current = { x: mx, y: my, t: now };
+        prevPosRefs.current[i] = { x: mx, y: my, t: now };
 
-        // EMA smoothing
-        if (!emaRef.current) {
-          emaRef.current = { x: mx, y: my, v: instVel };
+        if (!emaRefs.current[i]) {
+          emaRefs.current[i] = { x: mx, y: my, v: instVel };
         } else {
-          emaRef.current.x = smoothing * mx + (1 - smoothing) * emaRef.current.x;
-          emaRef.current.y = smoothing * my + (1 - smoothing) * emaRef.current.y;
-          emaRef.current.v = velSmoothing * instVel + (1 - velSmoothing) * emaRef.current.v;
+          emaRefs.current[i]!.x = smoothing * mx + (1 - smoothing) * emaRefs.current[i]!.x;
+          emaRefs.current[i]!.y = smoothing * my + (1 - smoothing) * emaRefs.current[i]!.y;
+          emaRefs.current[i]!.v = velSmoothing * instVel + (1 - velSmoothing) * emaRefs.current[i]!.v;
         }
 
-        // gesture is computed on the mirrored landmarks for consistency
         const mlm = lm.map((p) => ({ ...p, x: 1 - p.x }));
         const gesture = classifyGesture(mlm);
 
-        const hs: HandState = {
-          x: emaRef.current.x,
-          y: emaRef.current.y,
-          velocity: emaRef.current.v,
+        // handedness: MediaPipe sees the mirrored feed, so invert
+        let h: "Left" | "Right" | "Unknown" = "Unknown";
+        try {
+          const raw = handednesses[i]?.[0]?.categoryName;
+          if (raw === "Left") h = "Right";
+          else if (raw === "Right") h = "Left";
+        } catch { /* ignore */ }
+
+        outHands.push({
+          x: emaRefs.current[i]!.x,
+          y: emaRefs.current[i]!.y,
+          velocity: emaRefs.current[i]!.v,
           gesture,
           present: true,
-        };
-        setHand(hs);
-        onFrameRef.current?.(hs, mlm);
-      } else {
-        prevPosRef.current = null;
-        emaRef.current = null;
-        const hs: HandState = { ...DEFAULT_HAND };
-        setHand(hs);
-        onFrameRef.current?.(hs, null);
+          handedness: h,
+        });
+        outLms.push(mlm);
       }
+
+      setHands(outHands);
+      onHandsRef.current?.(outHands, outLms);
+      // primary hand callback (first present hand, else outHands[0])
+      const primaryIdx = outHands.findIndex((h) => h.present);
+      const pidx = primaryIdx >= 0 ? primaryIdx : 0;
+      onFrameRef.current?.(outHands[pidx], outLms[pidx]);
     }
     rafRef.current = requestAnimationFrame(loop);
-  }, [smoothing, velSmoothing]);
+  }, [smoothing, velSmoothing, numHands]);
 
   const start = useCallback(async () => {
     setError(null);
@@ -206,9 +225,9 @@ export function useHandTracking(opts?: {
       (video.srcObject as MediaStream).getTracks().forEach((t) => t.stop());
       video.srcObject = null;
     }
-    emaRef.current = null;
-    prevPosRef.current = null;
-    setHand(DEFAULT_HAND);
+    emaRefs.current = [null, null];
+    prevPosRefs.current = [null, null];
+    setHands([]);
   }, []);
 
   useEffect(() => {
@@ -221,5 +240,8 @@ export function useHandTracking(opts?: {
     };
   }, []);
 
-  return { videoRef, running, loading, error, hand, start, stop };
+  // convenience: primary hand (first present, or hands[0])
+  const hand: HandState = hands.find((h) => h.present) || hands[0] || DEFAULT_HAND;
+
+  return { videoRef, running, loading, error, hand, hands, start, stop };
 }

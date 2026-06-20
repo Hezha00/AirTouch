@@ -6,6 +6,8 @@ AirTouch has evolved from a single-page marketing site for a Python gesture-cont
 
 The Python desktop app still lives in `/gesture-control/` as the downloadable backend, but the website is now the primary experience.
 
+**Latest phase**: the Setup ("Get started / 60 seconds") section was removed from the hub home at the user's request. The orchestra was fully redesigned to fix velocity-detection glitches — it is now **two-handed** with many more controls, and intensity is driven by **discrete dynamic levels** (pp→ff) instead of jittery hand velocity.
+
 ## Architecture
 
 - **Single route** (`/`) with client-side view switching via React Context (`HubProvider` / `useHub`).

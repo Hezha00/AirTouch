@@ -8,7 +8,6 @@ import { Stats } from "@/components/sections/stats";
 import { Features } from "@/components/sections/features";
 import { GestureGuide } from "@/components/sections/gesture-guide";
 import { HowItWorks } from "@/components/sections/how-it-works";
-import { Setup } from "@/components/sections/setup";
 import { Ideas } from "@/components/sections/ideas";
 import { CursorControlView } from "@/components/views/cursor-control-view";
 import { OrchestraView } from "@/components/views/orchestra-view";
@@ -21,7 +20,6 @@ function HomeView() {
       <Features />
       <GestureGuide />
       <HowItWorks />
-      <Setup />
       <Ideas />
     </>
   );
