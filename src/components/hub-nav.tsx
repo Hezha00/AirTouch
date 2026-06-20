@@ -2,7 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Hand, Home, MousePointer2, Music, Palette, Fingerprint, Piano as PianoIcon, Presentation, Languages, ChevronLeft } from "lucide-react";
+import {
+  Hand, Home, MousePointer2, Music, Palette, Fingerprint,
+  Piano as PianoIcon, Presentation, Languages, ChevronLeft,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useHub, type ViewName } from "@/lib/gesture/hub-context";
 

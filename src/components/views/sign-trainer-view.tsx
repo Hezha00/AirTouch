@@ -35,10 +35,22 @@ const ASL: AslSign[] = [
   { letter: "B", name: "B", desc: "Flat hand, four fingers up, thumb tucked across palm", pattern: [false, true, true, true, true], hint: "Four fingers straight up, thumb folded across the palm" },
   { letter: "C", name: "C", desc: "Curved hand like the letter C", pattern: [true, true, true, true, true], hint: "Curve all fingers into a C shape" },
   { letter: "D", name: "D", desc: "Index finger up, others touching thumb", pattern: [false, true, false, false, false], hint: "Point up with index, touch thumb to other fingertips" },
+  { letter: "E", name: "E", desc: "Fingers curled into a fist, thumb across", pattern: [false, false, false, false, false], hint: "Curl all fingers into the palm, thumb tucked" },
+  { letter: "F", name: "F", desc: "Thumb and index touching in a circle, others up", pattern: [false, false, true, true, true], hint: "Circle thumb+index, three fingers up" },
+  { letter: "G", name: "G", desc: "Index finger pointing sideways", pattern: [false, true, false, false, false], hint: "Index finger extended sideways" },
+  { letter: "H", name: "H", desc: "Index and middle fingers pointing together", pattern: [false, true, true, false, false], hint: "Two fingers (index+middle) extended together" },
+  { letter: "I", name: "I", desc: "Pinky finger up, others folded", pattern: [false, false, false, false, true], hint: "Just the pinky up" },
+  { letter: "K", name: "K", desc: "Index and middle in a V, thumb between them", pattern: [true, true, true, false, false], hint: "Like a V but with thumb out between the fingers" },
   { letter: "L", name: "L", desc: "Thumb and index out in an L shape", pattern: [true, true, false, false, false], hint: "Make an L: thumb out sideways, index up" },
+  { letter: "P", name: "P", desc: "Like K but pointing down", pattern: [true, true, true, false, false], hint: "K shape rotated downward" },
+  { letter: "Q", name: "Q", desc: "Index and middle pointing down", pattern: [false, true, true, false, false], hint: "Like H but pointing downward" },
+  { letter: "R", name: "R", desc: "Index and middle fingers crossed", pattern: [false, true, true, false, false], hint: "Cross index and middle fingers" },
+  { letter: "T", name: "T", desc: "Thumb between index and middle fingers", pattern: [false, false, false, false, false], hint: "Thumb poking out between index+middle" },
   { letter: "V", name: "V", desc: "Index and middle fingers up in a V", pattern: [false, true, true, false, false], hint: "Peace sign — index and middle up in a V" },
   { letter: "W", name: "W", desc: "Index, middle, ring fingers up", pattern: [false, true, true, true, false], hint: "Three fingers up (index, middle, ring)" },
+  { letter: "X", name: "X", desc: "Index finger bent into a hook", pattern: [false, false, false, false, false], hint: "Bend your index finger into a hook shape" },
   { letter: "Y", name: "Y", desc: "Thumb and pinky out, others folded", pattern: [true, false, false, false, true], hint: "Hang loose — thumb and pinky out, three fingers folded" },
+  { letter: "Z", name: "Z", desc: "Index finger drawing a Z in the air", pattern: [false, true, false, false, false], hint: "Point with index, trace a Z shape" },
 ];
 
 function fingerStates(lm: Landmark[]): boolean[] {
@@ -58,7 +70,7 @@ function matchPattern(live: boolean[], target: boolean[]): number {
   return matches / 5;
 }
 
-type Mode = "browse" | "practice";
+type Mode = "browse" | "practice" | "quiz";
 
 export function SignTrainerView() {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -66,12 +78,20 @@ export function SignTrainerView() {
   const holdStartRef = useRef<number>(0);
   const practiceIdxRef = useRef(0);
   const scoreRef = useRef(0);
+  const quizOrderRef = useRef<number[]>([]);
+  const quizIdxRef = useRef(0);
+  const quizTimerRef = useRef<number>(0);
 
   const [running, setRunning] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>("browse");
   const [selectedIdx, setSelectedIdx] = useState(0);
+  const [quizIdx, setQuizIdx] = useState(0);
+  const [quizScore, setQuizScore] = useState(0);
+  const [quizTimeLeft, setQuizTimeLeft] = useState(60);
+  const [quizFinished, setQuizFinished] = useState(false);
+  const [quizTotal, setQuizTotal] = useState(0);
   const [livePattern, setLivePattern] = useState<boolean[] | null>(null);
   const [similarity, setSimilarity] = useState(0);
   const [matched, setMatched] = useState(false);
@@ -120,7 +140,9 @@ export function SignTrainerView() {
     setLivePattern(live);
 
     // match against the active target
-    const target = mode === "practice" ? ASL[practiceIdxRef.current] : ASL[selectedIdx];
+    const target = mode === "browse" ? ASL[selectedIdx]
+      : mode === "practice" ? ASL[practiceIdxRef.current]
+      : ASL[quizOrderRef.current[quizIdxRef.current] ?? 0];
     const sim = matchPattern(live, target.pattern);
     setSimilarity(sim);
 
@@ -150,8 +172,31 @@ export function SignTrainerView() {
         if (sim < 0.4) setFeedback("try");
         else setFeedback("none");
       }
+    } else if (mode === "quiz" && !quizFinished) {
+      if (isMatch) {
+        if (holdStartRef.current === 0) holdStartRef.current = performance.now();
+        const held = performance.now() - holdStartRef.current;
+        if (held > 600) {
+          // correct — next letter
+          setFeedback("good");
+          setQuizScore((s) => s + 1);
+          holdStartRef.current = 0;
+          const nextIdx = quizIdxRef.current + 1;
+          if (nextIdx >= quizOrderRef.current.length) {
+            // quiz complete
+            setQuizFinished(true);
+            if (quizTimerRef.current) { clearInterval(quizTimerRef.current); quizTimerRef.current = 0; }
+          } else {
+            quizIdxRef.current = nextIdx;
+            setQuizIdx(nextIdx);
+            setTimeout(() => setFeedback("none"), 500);
+          }
+        }
+      } else {
+        holdStartRef.current = 0;
+      }
     }
-  }, [mode, selectedIdx, matched]);
+  }, [mode, selectedIdx, matched, quizFinished]);
 
   const tracking = useHandTracking({ onFrame, smoothing: 0.55 });
   useEffect(() => { videoRef.current = tracking.videoRef.current; });
@@ -185,7 +230,57 @@ export function SignTrainerView() {
     holdStartRef.current = 0;
   };
 
-  const target = mode === "practice" ? ASL[practiceIdx] : ASL[selectedIdx];
+  // shuffle helper
+  const shuffle = (arr: number[]) => {
+    const a = [...arr];
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  };
+
+  const startQuiz = () => {
+    setMode("quiz");
+    quizOrderRef.current = shuffle(Array.from({ length: ASL.length }, (_, i) => i));
+    quizIdxRef.current = 0;
+    setQuizIdx(0);
+    setQuizScore(0);
+    setQuizTotal(quizOrderRef.current.length);
+    setQuizTimeLeft(60);
+    setQuizFinished(false);
+    setFeedback("none");
+    holdStartRef.current = 0;
+    // countdown timer
+    if (quizTimerRef.current) clearInterval(quizTimerRef.current);
+    quizTimerRef.current = window.setInterval(() => {
+      setQuizTimeLeft((t) => {
+        if (t <= 1) {
+          if (quizTimerRef.current) { clearInterval(quizTimerRef.current); quizTimerRef.current = 0; }
+          setQuizFinished(true);
+          return 0;
+        }
+        return t - 1;
+      });
+    }, 1000);
+  };
+
+  const stopQuiz = () => {
+    setMode("browse");
+    setFeedback("none");
+    holdStartRef.current = 0;
+    if (quizTimerRef.current) { clearInterval(quizTimerRef.current); quizTimerRef.current = 0; }
+    setQuizFinished(false);
+  };
+
+  // cleanup timer on unmount
+  useEffect(() => {
+    return () => { if (quizTimerRef.current) clearInterval(quizTimerRef.current); };
+  }, []);
+
+  const target = mode === "browse" ? ASL[selectedIdx]
+    : mode === "practice" ? ASL[practiceIdx]
+    : ASL[quizOrderRef.current[quizIdx] ?? 0];
   const FINGER_NAMES = ["Thumb", "Index", "Middle", "Ring", "Pinky"];
 
   return (
@@ -275,7 +370,7 @@ export function SignTrainerView() {
                   <div className="text-xs text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-1.5">
                     <BookOpen className="h-3.5 w-3.5" /> ASL Alphabet — click a letter to practice it
                   </div>
-                  <div className="grid grid-cols-4 sm:grid-cols-8 gap-2">
+                  <div className="grid grid-cols-5 sm:grid-cols-10 gap-2">
                     {ASL.map((s, i) => (
                       <button
                         key={s.letter}
@@ -285,12 +380,12 @@ export function SignTrainerView() {
                           selectedIdx === i ? "border-primary bg-primary/10 scale-105" : "border-white/10 bg-white/[0.02] hover:border-white/30"
                         )}
                       >
-                        <span className={cn("text-2xl font-bold", selectedIdx === i ? "text-primary" : "text-foreground")}>{s.letter}</span>
+                        <span className={cn("text-xl font-bold", selectedIdx === i ? "text-primary" : "text-foreground")}>{s.letter}</span>
                       </button>
                     ))}
                   </div>
                 </>
-              ) : (
+              ) : mode === "practice" ? (
                 <>
                   <div className="flex items-center justify-between mb-3">
                     <div className="text-xs text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
@@ -301,11 +396,32 @@ export function SignTrainerView() {
                       <span className="text-muted-foreground">/ {attempts} tries</span>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1">
                     {ASL.map((s, i) => (
                       <div key={s.letter} className={cn(
                         "flex-1 h-1.5 rounded-full transition-colors",
                         i < practiceIdx ? "bg-primary" : i === practiceIdx ? "bg-primary/50 animate-pulse" : "bg-white/10"
+                      )} />
+                    ))}
+                  </div>
+                </>
+              ) : (
+                // quiz mode
+                <>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="text-xs text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                      <Target className="h-3.5 w-3.5" /> Quiz — letter {quizIdx + 1} of {quizTotal}
+                    </div>
+                    <div className="flex items-center gap-3 text-xs">
+                      <span className="text-chart-4 font-bold flex items-center gap-1"><Trophy className="h-3.5 w-3.5" /> {quizScore}</span>
+                      <span className={cn("font-mono tabular-nums", quizTimeLeft <= 10 ? "text-destructive animate-pulse" : "text-muted-foreground")}>{quizTimeLeft}s</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {quizOrderRef.current.map((_, i) => (
+                      <div key={i} className={cn(
+                        "flex-1 h-1.5 rounded-full transition-colors",
+                        i < quizIdx ? "bg-primary" : i === quizIdx ? "bg-chart-4/50 animate-pulse" : "bg-white/10"
                       )} />
                     ))}
                   </div>
@@ -362,15 +478,38 @@ export function SignTrainerView() {
             <div className="rounded-xl glass-strong p-4 col-span-2 lg:col-span-1">
               <div className="text-xs text-muted-foreground uppercase tracking-wider mb-3">Mode</div>
               {mode === "browse" ? (
-                <button onClick={startPractice} className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:brightness-110 transition-all">
-                  <GraduationCap className="h-4 w-4" /> Start Practice
-                </button>
-              ) : (
+                <div className="space-y-2">
+                  <button onClick={startPractice} className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:brightness-110 transition-all">
+                    <GraduationCap className="h-4 w-4" /> Start Practice
+                  </button>
+                  <button onClick={startQuiz} className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-chart-4/20 text-chart-4 text-sm font-medium hover:bg-chart-4/30 transition-all border border-chart-4/40">
+                    <Trophy className="h-4 w-4" /> Timed Quiz (60s)
+                  </button>
+                </div>
+              ) : mode === "practice" ? (
                 <div className="space-y-2">
                   <button onClick={stopPractice} className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg glass text-sm font-medium hover:bg-white/10 transition-all">
                     <RotateCcw className="h-4 w-4" /> End Practice
                   </button>
                   <div className="text-center text-xs text-muted-foreground">Hold the correct shape for 0.8s to advance</div>
+                </div>
+              ) : quizFinished ? (
+                <div className="space-y-3 text-center">
+                  <div className="text-3xl font-bold text-gradient">{quizScore} / {quizTotal}</div>
+                  <div className="text-xs text-muted-foreground">{quizScore === quizTotal ? "Perfect! 🏆" : quizScore >= quizTotal * 0.7 ? "Great job!" : quizScore >= quizTotal * 0.5 ? "Good effort!" : "Keep practicing!"}</div>
+                  <button onClick={startQuiz} className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-chart-4 text-white text-sm font-medium hover:brightness-110 transition-all">
+                    <RotateCcw className="h-4 w-4" /> Retry Quiz
+                  </button>
+                  <button onClick={stopQuiz} className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg glass text-sm font-medium hover:bg-white/10 transition-all">
+                    Back to Browse
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <button onClick={stopQuiz} className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg glass text-sm font-medium hover:bg-white/10 transition-all">
+                    <RotateCcw className="h-4 w-4" /> End Quiz
+                  </button>
+                  <div className="text-center text-xs text-muted-foreground">Form each letter and hold 0.6s to score</div>
                 </div>
               )}
             </div>
