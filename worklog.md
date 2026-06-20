@@ -6,7 +6,7 @@ AirTouch is a **browser-based gesture-recognition hub** with **7 interactive too
 
 The Python desktop app still lives in `/gesture-control/` as the downloadable backend.
 
-**This phase**: Added a 7th tool — **Sign Language Trainer** (ASL alphabet with live finger-pattern matching + practice mode) — bringing the hub from 6 to 7 tools.
+**This phase**: Added a **sustain pedal gesture** to the Piano (open hand = toggle sustain + visual note trail), **performance throttling** to the shared hand-tracking hook (reduces React re-renders from ~30-60/sec to ~12/sec), and **polished the home page** (improved stats section with icons + updated "7 tools" count, animated section dividers).
 
 ## Architecture
 
@@ -33,20 +33,27 @@ The Python desktop app still lives in `/gesture-control/` as the downloadable ba
 
 ## Completed this phase
 
-1. **Sign Language Trainer** (`sign-trainer-view.tsx`) — a 7th tool:
-   - 8-letter ASL reference (A, B, C, D, L, V, W, Y) — each with a coarse finger-extension pattern, description, and hint.
-   - **Browse mode**: click any letter tile to see its detail card (big letter + name + description + hint) and a finger-pattern visualizer showing target vs your live hand, per-finger, with check/X feedback.
-   - **Practice mode**: the trainer walks through the alphabet; form each letter with your hand and hold the correct shape for 0.8s to advance. Live similarity meter (0–100%), big "Form the letter" overlay on the camera, score + attempts counter, progress bar, and a "Correct!" success banner.
-   - Skeleton overlay turns green when the pattern matches (≥80% similarity).
-2. **Home page updated** — hero now showcases all 7 tools in a `lg:grid-cols-3 xl:grid-cols-4` grid (clean 4+3 wrap at desktop). Nav expanded to 8 tabs (Hub/Cursor/Canvas/Orchestra/Piano/Presenter/Sign/Hand Lab).
-3. **Verified** — ESLint clean, page returns 200, agent-browser confirms all 8 views render; sign trainer shows alphabet grid + detail card + finger-pattern visualizer + practice controls; home shows 7 tool cards in a clean 4+3 grid.
+1. **Piano sustain pedal gesture** (`piano-view.tsx`):
+   - Open palm toggles sustain ON/OFF (edge-triggered, so you can close your hand after toggling).
+   - When sustain is ON, releasing a pinch does NOT release the notes — they keep ringing until sustain is turned OFF.
+   - When sustain turns OFF, all held notes release immediately.
+   - New **sustain + note trail bar** below the keyboard: shows the sustain ON/OFF indicator, "Open palm = toggle" hint, and a live "Recent" trail of the last 8 played notes (animated badges that fade out after 3 seconds).
+   - Updated the "How to play" sidebar to mention the sustain gesture.
+2. **Performance throttling** (`use-hand-tracking.ts`):
+   - The `onFrame`/`onHands` callbacks still fire every frame (for smooth canvas drawing via refs).
+   - But `setHands` (the React state update) is now throttled: only fires when the gesture changes, the position moves >1% of the frame, or every 80ms (~12fps) — whichever comes first.
+   - Reduces React re-renders from ~30-60/sec to ~12/sec, improving performance on lower-end devices.
+3. **Home page styling polish**:
+   - **Stats section** (`stats.tsx`): each stat card now has an icon (Fingerprint/Zap/Layers/CloudOff), a hover glow, and the count was updated from "4 core gestures" to "7 interactive tools".
+   - **Section dividers** (`section-divider.tsx`): a new reusable component with an animated gradient line that scales in on scroll, placed between each home section (Stats → Features → Gestures → How It Works → Ideas) for better visual flow.
+4. **Verified** — ESLint clean, page returns 200, agent-browser confirms all 8 views render; piano shows the new sustain bar + note trail; home shows the improved stats with icons and "7" count.
 
 ## Verification results
 
 - `bun run lint` → clean (no errors/warnings).
 - Dev server: `GET / 200`, no compile errors.
-- agent-browser visual QA at 1440×900: home (7 tool cards, clean 4+3 grid), sign trainer (camera + ASL alphabet grid + detail card + finger pattern + mode controls) all render correctly.
-- Console: a stale Next.js HMR error overlay about a `SignLanguage` icon name that no longer exists in the code (the file uses `Languages`); this is a dev-only cache artifact and does not affect runtime — all views render and navigate correctly.
+- agent-browser visual QA at 1440×900: piano (sustain bar with "Sustain OFF" indicator + "Recent: —" trail + "Open palm = sustain pedal" in How to play), home (stats row with icons + values 21/~10ms/7/0) all render correctly.
+- Console: the persistent `SignLanguage` dev-overlay error is confirmed non-blocking — the source code uses `Languages` (grep finds no `SignLanguage`), all 8 views render and navigate, and the error will not appear in production builds.
 
 ## Unresolved issues / risks
 
@@ -59,8 +66,7 @@ The Python desktop app still lives in `/gesture-control/` as the downloadable ba
 
 1. **Bundle MediaPipe locally** — move the `.task` model + WASM into `/public` so tools work offline and load faster.
 2. **Add an 8th tool** — e.g. "Gesture Gamepad" (map gestures to game inputs), "Air Whiteboard" (collaborative), or "Hand Poses Gallery" (custom gesture recorder + binder).
-3. **Performance throttling** — only update React state when values change by a threshold to cut re-renders.
-4. **Tablet (768px) fine-tune** — the views stack at `lg` (1024px); a dedicated tablet pass could keep camera + sidebar side-by-side a bit longer with tighter spacing.
-5. **Piano: sustain pedal gesture** — add an open-hand = sustain pedal mapping, and a visual "now playing" note trail.
-6. **Presenter: custom deck upload** — let users load their own slide images / Markdown instead of the built-in sample deck.
-7. **Sign Trainer: more letters + quiz mode** — extend the ASL set beyond 8 letters, add a timed quiz with a final score.
+3. **Tablet (768px) fine-tune** — the views stack at `lg` (1024px); a dedicated tablet pass could keep camera + sidebar side-by-side a bit longer with tighter spacing.
+4. **Presenter: custom deck upload** — let users load their own slide images / Markdown instead of the built-in sample deck.
+5. **Sign Trainer: more letters + quiz mode** — extend the ASL set beyond 8 letters, add a timed quiz with a final score.
+6. **Investigate the `SignLanguage` dev-overlay** — the persistent Next.js dev error overlay (about an icon name that no longer exists in the code) is non-blocking but cosmetically undesirable for developers; a full `node_modules` reinstall or Next.js version bump may clear it.

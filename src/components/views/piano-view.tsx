@@ -58,6 +58,13 @@ function isPinch(lm: Landmark[] | null): boolean {
   return Math.hypot(lm[4].x - lm[8].x, lm[4].y - lm[8].y) / ref < 0.4;
 }
 
+function isOpenPalm(lm: Landmark[] | null): boolean {
+  if (!lm) return false;
+  // all 5 fingertips above their PIP joints (y smaller = higher)
+  const ext = [4, 8, 12, 16, 20].map((i) => lm[i].y < lm[i - 2].y);
+  return ext.every(Boolean);
+}
+
 export function PianoView() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
@@ -86,6 +93,11 @@ export function PianoView() {
   const [hasRecording, setHasRecording] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [noteCount, setNoteCount] = useState(0);
+  const [sustainOn, setSustainOn] = useState(false);
+  const [noteTrail, setNoteTrail] = useState<{ note: string; id: number }[]>([]);
+  const sustainRef = useRef(false);
+  const prevOpenRef = useRef(false);
+  const trailIdRef = useRef(0);
 
   // init audio
   const initAudio = useCallback(async () => {
@@ -152,7 +164,27 @@ export function PianoView() {
       cur.style.opacity = "1";
 
       const pinch = isPinch(lm);
-      setGesture(pinch ? "pinch (play)" : "open (move)");
+      const openPalm = isOpenPalm(lm);
+
+      // sustain pedal: open palm toggles sustain ON, closing hand toggles OFF
+      if (openPalm && !prevOpenRef.current) {
+        sustainRef.current = !sustainRef.current;
+        setSustainOn(sustainRef.current);
+        // if sustain turned off, release all held notes
+        if (!sustainRef.current && synthRef.current && activeNotesRef.current.size > 0) {
+          synthRef.current.releaseAll();
+          if (isRecordingRef.current) {
+            for (const n of activeNotesRef.current) {
+              recordingRef.current.push({ note: n, time: performance.now() - recordStartRef.current, on: false });
+            }
+          }
+          activeNotesRef.current.clear();
+          setActiveNotes(new Set());
+        }
+      }
+      prevOpenRef.current = openPalm;
+
+      setGesture(pinch ? "pinch (play)" : openPalm ? "open (sustain)" : "move");
 
       // hit-test which key the cursor is over
       const overKey = (() => {
@@ -190,13 +222,17 @@ export function PianoView() {
           activeNotesRef.current.add(overKey);
           setActiveNotes(new Set(activeNotesRef.current));
           setNoteCount((n) => n + 1);
+          // add to note trail
+          const id = trailIdRef.current++;
+          setNoteTrail((t) => [...t, { note: overKey, id }].slice(-8));
+          setTimeout(() => setNoteTrail((t) => t.filter((n) => n.id !== id)), 3000);
           if (isRecordingRef.current) {
             recordingRef.current.push({ note: overKey, time: performance.now() - recordStartRef.current, on: true });
           }
         }
       } else if (!pinch && prevPinchRef.current) {
-        // pinch released — release all active notes
-        if (synthRef.current && activeNotesRef.current.size > 0) {
+        // pinch released — release notes only if sustain is OFF
+        if (!sustainRef.current && synthRef.current && activeNotesRef.current.size > 0) {
           synthRef.current.releaseAll();
           if (isRecordingRef.current) {
             for (const n of activeNotesRef.current) {
@@ -434,6 +470,33 @@ export function PianoView() {
               </div>
             </div>
 
+            {/* sustain + note trail bar */}
+            <div className="rounded-xl glass-strong p-3 flex items-center gap-3 flex-wrap min-h-[52px]">
+              <div className={cn("flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all", sustainOn ? "bg-primary/20 text-primary border border-primary/40" : "bg-white/5 text-muted-foreground")}>
+                <span className={cn("h-2 w-2 rounded-full transition-colors", sustainOn ? "bg-primary animate-pulse" : "bg-muted-foreground")} />
+                Sustain {sustainOn ? "ON" : "OFF"}
+              </div>
+              <div className="text-xs text-muted-foreground">Open palm = toggle</div>
+              {/* note trail */}
+              <div className="flex items-center gap-1.5 ml-auto flex-wrap">
+                <span className="text-xs text-muted-foreground">Recent:</span>
+                <AnimatePresence>
+                  {noteTrail.map((n) => (
+                    <motion.span
+                      key={n.id}
+                      initial={{ opacity: 0, scale: 0.5, y: 10 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.5 }}
+                      className="px-2 py-0.5 rounded-md bg-primary/15 text-primary text-xs font-mono font-bold"
+                    >
+                      {n.note}
+                    </motion.span>
+                  ))}
+                </AnimatePresence>
+                {noteTrail.length === 0 && <span className="text-xs text-muted-foreground/50">—</span>}
+              </div>
+            </div>
+
             {/* recording bar */}
             <div className="rounded-xl glass-strong p-3 flex items-center gap-3 flex-wrap">
               {!isRecording ? (
@@ -514,6 +577,7 @@ export function PianoView() {
                 <p>✋ Move hand over keys</p>
                 <p>🤏 Pinch to strike a note</p>
                 <p>✊ Hold pinch for chords</p>
+                <p>🖐 Open palm = sustain pedal</p>
               </div>
             </div>
 

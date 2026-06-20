@@ -9,6 +9,7 @@ import { Features } from "@/components/sections/features";
 import { GestureGuide } from "@/components/sections/gesture-guide";
 import { HowItWorks } from "@/components/sections/how-it-works";
 import { Ideas } from "@/components/sections/ideas";
+import { SectionDivider } from "@/components/sections/section-divider";
 import { CursorControlView } from "@/components/views/cursor-control-view";
 import { OrchestraView } from "@/components/views/orchestra-view";
 import { AirCanvasView } from "@/components/views/air-canvas-view";
@@ -22,9 +23,13 @@ function HomeView() {
     <>
       <Hero />
       <Stats />
+      <SectionDivider />
       <Features />
+      <SectionDivider />
       <GestureGuide />
+      <SectionDivider />
       <HowItWorks />
+      <SectionDivider />
       <Ideas />
     </>
   );

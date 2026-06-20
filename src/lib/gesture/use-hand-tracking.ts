@@ -94,6 +94,13 @@ export function useHandTracking(opts?: {
   const [error, setError] = useState<string | null>(null);
   const [hands, setHands] = useState<HandState[]>([]);
 
+  // throttling: only update React state when values change meaningfully
+  // (the onFrame/onHands callbacks still fire every frame for smooth canvas drawing)
+  const lastStateUpdateRef = useRef(0);
+  const lastGestureRef = useRef<string>("");
+  const lastPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const STATE_UPDATE_INTERVAL = 80; // ms — ~12fps for state updates
+
   const loadLandmarker = useCallback(async () => {
     if (landmarkerRef.current) return landmarkerRef.current;
     const vision = await import("@mediapipe/tasks-vision");
@@ -186,7 +193,21 @@ export function useHandTracking(opts?: {
         outLms.push(mlm);
       }
 
-      setHands(outHands);
+      // throttled state update — only re-render React when gesture changes
+      // or position moves >1% or every 80ms, whichever comes first
+      const now = performance.now();
+      const primary = outHands.find((h) => h.present);
+      const gestureChanged = primary && primary.gesture !== lastGestureRef.current;
+      const posChanged = primary && (Math.abs(primary.x - lastPosRef.current.x) > 0.01 || Math.abs(primary.y - lastPosRef.current.y) > 0.01);
+      const timeUp = now - lastStateUpdateRef.current >= STATE_UPDATE_INTERVAL;
+      if (gestureChanged || posChanged || timeUp || !primary) {
+        setHands(outHands);
+        lastStateUpdateRef.current = now;
+        if (primary) {
+          lastGestureRef.current = primary.gesture;
+          lastPosRef.current = { x: primary.x, y: primary.y };
+        }
+      }
       onHandsRef.current?.(outHands, outLms);
       // primary hand callback (first present hand, else outHands[0])
       const primaryIdx = outHands.findIndex((h) => h.present);
