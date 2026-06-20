@@ -99,21 +99,38 @@ def draw_bounding_box(frame: np.ndarray, cfg: Config) -> None:
 
 
 def draw_landmarks(frame: np.ndarray, lm, cfg: Config) -> None:
-    """Draw the 21-point skeleton.  ``lm`` is a MediaPipe landmark list."""
+    """
+    Draw the 21-point skeleton.
+
+    ``lm`` may be EITHER:
+      * a list of 21 (x, y) tuples in normalised 0..1 coords, OR
+      * a legacy MediaPipe ``landmark`` object exposing ``.landmark[i].x/.y``.
+    """
     h, w = frame.shape[:2]
-    pts = [(int(p.x * w), int(p.y * h)) for p in lm.landmark]
+
+    # Normalise both forms to a list of (x, y) normalised tuples.
+    if isinstance(lm, (list, tuple)) and len(lm) > 0 and isinstance(lm[0], (list, tuple)):
+        norm_pts = [(float(p[0]), float(p[1])) for p in lm]
+    elif hasattr(lm, "landmark"):
+        norm_pts = [(p.x, p.y) for p in lm.landmark]
+    else:
+        return
+
+    pts = [(int(x * w), int(y * h)) for x, y in norm_pts]
 
     # connections
     for a, b in HAND_CONNECTIONS:
-        cv2.line(frame, pts[a], pts[b], cfg.CONNECTION_COLOR, 2, cv2.LINE_AA)
+        if a < len(pts) and b < len(pts):
+            cv2.line(frame, pts[a], pts[b], cfg.CONNECTION_COLOR, 2, cv2.LINE_AA)
 
     # joints
-    for i, (px, py) in enumerate(pts):
+    for px, py in pts:
         cv2.circle(frame, (px, py), 4, cfg.LANDMARK_COLOR, -1, cv2.LINE_AA)
 
     # highlight the index tip (landmark 8) -- the cursor driver
-    ix, iy = pts[8]
-    cv2.circle(frame, (ix, iy), 9, cfg.ACCENT, 2, cv2.LINE_AA)
+    if len(pts) > 8:
+        ix, iy = pts[8]
+        cv2.circle(frame, (ix, iy), 9, cfg.ACCENT, 2, cv2.LINE_AA)
 
 
 def draw_pinch_meter(frame, cx, cy, ratio, threshold, cfg):

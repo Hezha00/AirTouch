@@ -15,7 +15,6 @@ Keys:
 from __future__ import annotations
 
 import argparse
-import importlib
 import sys
 import time
 
@@ -29,6 +28,7 @@ from hand_gestures import (
     GestureEngine, Landmarks,
     G_IDLE, G_MOVE, G_LCLICK, G_RCLICK, G_SCROLL, G_VOLUME,
 )
+from hand_tracker import create_hand_tracker
 from ui import (
     print_guide, draw_bounding_box, draw_landmarks, draw_status,
     draw_volume_bar, draw_help_overlay, draw_pinch_meter,
@@ -42,7 +42,6 @@ from volume_control import VolumeController
 def configure_pyautogui(cfg: Config) -> None:
     pyautogui.FAILSAFE = cfg.FAILSAFE
     pyautogui.PAUSE = cfg.PYAUTOGUI_PAUSE
-    # Hide PyAutoGUI's own delay so the cursor feels instant.
     try:
         pyautogui.MINIMUM_DURATION = 0
         pyautogui.MINIMUM_SLEEP = 0
@@ -51,93 +50,7 @@ def configure_pyautogui(cfg: Config) -> None:
 
 
 # --------------------------------------------------------------------------- #
-#  Robust MediaPipe loader
-# --------------------------------------------------------------------------- #
-#  Newer MediaPipe builds (and some wheels on Python 3.11/3.12) do NOT
-#  auto-populate `mp.solutions` when you `import mediapipe`.  We therefore
-#  force-import the submodules explicitly and return the Hands class.
-# --------------------------------------------------------------------------- #
-def load_mediapipe_hands():
-    """
-    Return the MediaPipe ``Hands`` solution class in a version-robust way.
-
-    Tries several import strategies and, on failure, reports EVERY error
-    (not just the last one) plus a full environment diagnostic so the real
-    cause is visible.
-    """
-    import sys as _sys
-    import mediapipe as mp
-
-    errors: list[str] = []
-
-    # Strategy 1: mediapipe.solutions.hands
-    try:
-        importlib.import_module("mediapipe.solutions")
-        hands_mod = importlib.import_module("mediapipe.solutions.hands")
-        if hasattr(hands_mod, "Hands"):
-            return hands_mod.Hands, getattr(hands_mod, "HAND_CONNECTIONS", None)
-        errors.append("mediapipe.solutions.hands imported but has no 'Hands'")
-    except Exception as e:
-        import traceback
-        errors.append(
-            f"mediapipe.solutions.hands -> {type(e).__name__}: {e}\n"
-            + traceback.format_exc().strip()
-        )
-
-    # Strategy 2: mediapipe.python.solutions.hands
-    try:
-        hands_mod = importlib.import_module("mediapipe.python.solutions.hands")
-        if hasattr(hands_mod, "Hands"):
-            return hands_mod.Hands, getattr(hands_mod, "HAND_CONNECTIONS", None)
-        errors.append("mediapipe.python.solutions.hands imported but has no 'Hands'")
-    except Exception as e:
-        errors.append(
-            f"mediapipe.python.solutions.hands -> {type(e).__name__}: {e}"
-        )
-
-    # ---- environment diagnostic ---------------------------------------- #
-    diag: list[str] = []
-    diag.append(f"Python   : {_sys.version.split()[0]}  ({_sys.executable})")
-    diag.append(f"mediapipe: {getattr(mp, '__version__', 'unknown')}  "
-                f"({getattr(mp, '__file__', '?')})")
-    diag.append("mp attrs : "
-                + str([a for a in dir(mp) if not a.startswith("_")]))
-    try:
-        import google.protobuf
-        diag.append(f"protobuf : {google.protobuf.__version__}")
-    except Exception as e:
-        diag.append(f"protobuf : <unavailable: {e}>")
-    try:
-        import numpy
-        diag.append(f"numpy    : {numpy.__version__}")
-    except Exception:
-        diag.append("numpy    : <unavailable>")
-    try:
-        import cv2
-        diag.append(f"opencv   : {cv2.__version__}")
-    except Exception:
-        diag.append("opencv   : <unavailable>")
-
-    raise RuntimeError(
-        "Could not load MediaPipe Hands solution.\n"
-        "---- attempted strategies ----\n"
-        + "\n\n".join(f"[{i+1}] {e}" for i, e in enumerate(errors))
-        + "\n\n---- environment ----\n"
-        + "\n".join(diag)
-        + "\n\n---- most likely fixes ----\n"
-        "  A) Protobuf conflict (most common): "
-        "pip install 'protobuf<4'   (mediapipe needs protobuf 3.20.x)\n"
-        "  B) Force pure-python protobuf: set "
-        "PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python\n"
-        "  C) Pin a known-good mediapipe: "
-        "pip install 'mediapipe==0.10.14'\n"
-        "  D) Use Python 3.10 or 3.11 (mediapipe has limited 3.12+ support)\n"
-        "  Run 'python diagnose.py' for a full report."
-    )
-
-
-# --------------------------------------------------------------------------- #
-#  Open camera
+#  Open camera (tries CAP_DSHOW first on Windows, then generic backend)
 # --------------------------------------------------------------------------- #
 def open_camera(cfg: Config) -> cv2.VideoCapture:
     cap = cv2.VideoCapture(cfg.CAMERA_INDEX, cv2.CAP_DSHOW)
@@ -145,7 +58,6 @@ def open_camera(cfg: Config) -> cv2.VideoCapture:
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cfg.CAM_HEIGHT)
     cap.set(cv2.CAP_PROP_FPS, cfg.CAM_FPS)
     if not cap.isOpened():
-        # Fallback: try without CAP_DSHOW (some setups dislike it).
         cap = cv2.VideoCapture(cfg.CAMERA_INDEX)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, cfg.CAM_WIDTH)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cfg.CAM_HEIGHT)
@@ -194,23 +106,8 @@ def run(cfg: Config) -> None:
         sys.exit(1)
     print("[init] camera opened.")
 
-    # ---- try to load MediaPipe Hands ------------------------------------ #
-    hands = None
-    mp_error: str | None = None
-    try:
-        HandsCls, _connections = load_mediapipe_hands()
-        hands = HandsCls(
-            static_image_mode=False,
-            max_num_hands=cfg.MAX_NUM_HANDS,
-            min_detection_confidence=cfg.MIN_DETECTION_CONFIDENCE,
-            min_tracking_confidence=cfg.MIN_TRACKING_CONFIDENCE,
-        )
-        print("[init] MediaPipe Hands loaded successfully.")
-    except Exception as e:
-        mp_error = str(e)
-        print("[warn] MediaPipe Hands could not be loaded:")
-        print("       " + mp_error)
-        print("[warn] The camera window will still open (hand tracking disabled).")
+    # ---- create hand tracker (Tasks API or legacy solutions API) -------- #
+    tracker = create_hand_tracker(cfg)
 
     print("[init] press H for help, Q / ESC to quit.\n")
 
@@ -219,12 +116,13 @@ def run(cfg: Config) -> None:
     fps = 0.0
     last_cursor: tuple[int, int] | None = None
     active_volume_pct: float | None = None
+    # Monotonic timestamp for the Tasks API (detect_for_video needs ms).
+    frame_ts = 0
 
     try:
         while True:
             ok, frame = cap.read()
             if not ok:
-                # Show a placeholder frame so the window never disappears.
                 frame = np.zeros((cfg.CAM_HEIGHT, cfg.CAM_WIDTH, 3), dtype=np.uint8)
                 draw_banner(frame, "NO CAMERA FRAME",
                             "check that the webcam is connected")
@@ -239,16 +137,15 @@ def run(cfg: Config) -> None:
             gesture = G_IDLE
             pinch_l = pinch_r = 1.0
 
-            if hands is not None:
-                # 2. MediaPipe expects RGB
-                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                rgb.flags.writeable = False
-                results = hands.process(rgb)
-                rgb.flags.writeable = True
+            if tracker is not None:
+                # 2. run hand detection (API-agnostic).
+                frame_ts = int(time.time() * 1000)
+                hands = tracker.process(frame, frame_ts)
 
-                if results.multi_hand_landmarks:
-                    hand_lm = results.multi_hand_landmarks[0]
-                    lm = Landmarks(pts=[(p.x, p.y) for p in hand_lm.landmark])
+                if hands:
+                    # Use the first (strongest) hand.
+                    norm_pts = hands[0]
+                    lm = Landmarks(pts=norm_pts)
 
                     res = engine.detect(lm)
                     gesture = res.name
@@ -278,7 +175,7 @@ def run(cfg: Config) -> None:
                             active_volume_pct = None
 
                     # ---- visual skeleton + pinch meters --------------- #
-                    draw_landmarks(frame, hand_lm, cfg)
+                    draw_landmarks(frame, norm_pts, cfg)
                     h, w = frame.shape[:2]
                     ix, iy = int(lm.x(8) * w), int(lm.y(8) * h)
                     draw_pinch_meter(frame, ix, iy, pinch_l,
@@ -291,7 +188,7 @@ def run(cfg: Config) -> None:
                     cursor.reset()
                     active_volume_pct = None
             else:
-                # MediaPipe unavailable -> just show the live feed + warning.
+                # Hand tracking unavailable -> still show the live feed.
                 draw_banner(
                     frame,
                     "HAND TRACKING DISABLED",
@@ -331,9 +228,9 @@ def run(cfg: Config) -> None:
     except KeyboardInterrupt:
         pass
     finally:
-        if hands is not None:
+        if tracker is not None:
             try:
-                hands.close()
+                tracker.close()
             except Exception:
                 pass
         cap.release()
