@@ -15,6 +15,7 @@ Keys:
 from __future__ import annotations
 
 import argparse
+import ctypes
 import sys
 import time
 
@@ -47,6 +48,65 @@ def configure_pyautogui(cfg: Config) -> None:
         pyautogui.MINIMUM_SLEEP = 0
     except AttributeError:
         pass
+
+
+# --------------------------------------------------------------------------- #
+#  Keep the OpenCV window on top of everything
+# --------------------------------------------------------------------------- #
+#  We try two strategies:
+#    1. cv2.WND_PROP_TOPMOST  (OpenCV >= 4.5 on Windows)
+#    2. Win32 SetWindowPos    (fallback via ctypes)
+#  The flag is re-asserted periodically because some window managers drop
+#  it after the user alt-tabs or clicks another window.
+# --------------------------------------------------------------------------- #
+_WND_PROP_TOPMOST = getattr(cv2, "WND_PROP_TOPMOST", None)
+_HWND_NONE = -1
+_win32_loaded = False
+_user32 = None
+try:
+    if sys.platform == "win32":
+        _user32 = ctypes.WinDLL("user32")
+        _win32_loaded = True
+except Exception:
+    _win32_loaded = False
+
+# Win32 constants
+_SWP_NOMOVE = 0x0002
+_SWP_NOSIZE = 0x0001
+_HWND_TOPMOST = -1
+_HWND_NOTOPMOST = -2
+_SWP_SHOWWINDOW = 0x0040
+
+
+def _cv_hwnd(window_name: str):
+    """Best-effort retrieval of the OpenCV window's native handle."""
+    try:
+        return cv2.getWindowProperty(window_name, 0)  # arbitrary prop probe
+    except Exception:
+        return None
+
+
+def make_window_topmost(window_name: str) -> None:
+    """Pin the named OpenCV window above all others."""
+    # Strategy 1: OpenCV native property.
+    if _WND_PROP_TOPMOST is not None:
+        try:
+            cv2.setWindowProperty(window_name, _WND_PROP_TOPMOST, 1)
+            return
+        except Exception:
+            pass
+    # Strategy 2: Win32 SetWindowPos via ctypes (Windows only).
+    if _win32_loaded and _user32 is not None:
+        try:
+            # Find the window by its exact title.
+            hwnd = _user32.FindWindowW(None, window_name)
+            if hwnd:
+                _user32.SetWindowPos(
+                    hwnd, _HWND_TOPMOST, 0, 0, 0, 0,
+                    _SWP_NOMOVE | _SWP_NOSIZE | _SWP_SHOWWINDOW,
+                )
+        except Exception:
+            pass
 
 
 # --------------------------------------------------------------------------- #
@@ -109,7 +169,14 @@ def run(cfg: Config) -> None:
     # ---- create hand tracker (Tasks API or legacy solutions API) -------- #
     tracker = create_hand_tracker(cfg)
 
-    print("[init] press H for help, Q / ESC to quit.\n")
+    # ---- create the OpenCV window up front & pin it on top ------------- #
+    cv2.namedWindow(cfg.WINDOW_NAME, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(cfg.WINDOW_NAME, cfg.CAM_WIDTH, cfg.CAM_HEIGHT)
+    make_window_topmost(cfg.WINDOW_NAME)
+
+    print("[init] press H for help, Q / ESC to quit.")
+    print("[init] window is pinned on top.  Move mouse to a screen corner "
+          "to abort (failsafe).\n")
 
     help_on = False
     prev_t = time.time()
@@ -118,6 +185,8 @@ def run(cfg: Config) -> None:
     active_volume_pct: float | None = None
     # Monotonic timestamp for the Tasks API (detect_for_video needs ms).
     frame_ts = 0
+    frame_count = 0
+    failsafe_triggered = False
 
     try:
         while True:
@@ -152,27 +221,35 @@ def run(cfg: Config) -> None:
                     pinch_l, pinch_r = res.pinch_ratio_l, res.pinch_ratio_r
 
                     # ---- act on the gesture --------------------------- #
-                    if res.cursor_target is not None:
-                        if gesture == G_MOVE:
-                            sx, sy = cursor.update(*res.cursor_target)
-                            cursor.move_to(sx, sy)
-                            last_cursor = (int(sx), int(sy))
-                        elif gesture in (G_LCLICK, G_RCLICK):
-                            cursor.update(*res.cursor_target)
+                    #  All pyautogui calls are guarded: a FailSafeException
+                    #  means the user deliberately shoved the mouse into a
+                    #  screen corner to abort, so we exit the loop cleanly
+                    #  instead of dumping a traceback.
+                    try:
+                        if res.cursor_target is not None:
+                            if gesture == G_MOVE:
+                                sx, sy = cursor.update(*res.cursor_target)
+                                cursor.move_to(sx, sy)
+                                last_cursor = (int(sx), int(sy))
+                            elif gesture in (G_LCLICK, G_RCLICK):
+                                cursor.update(*res.cursor_target)
 
-                    if gesture == G_LCLICK:
-                        pyautogui.click(button="left")
-                    elif gesture == G_RCLICK:
-                        pyautogui.click(button="right")
-                    elif gesture == G_SCROLL and res.scroll_delta != 0.0:
-                        ticks = cfg.SCROLL_TICKS
-                        pyautogui.scroll(-ticks if res.scroll_delta > 0 else ticks)
-                    elif gesture == G_VOLUME and res.volume_level is not None:
-                        volume.set_level(res.volume_level)
-                        active_volume_pct = res.volume_level * 100.0
-                    else:
-                        if gesture != G_VOLUME:
-                            active_volume_pct = None
+                        if gesture == G_LCLICK:
+                            pyautogui.click(button="left")
+                        elif gesture == G_RCLICK:
+                            pyautogui.click(button="right")
+                        elif gesture == G_SCROLL and res.scroll_delta != 0.0:
+                            ticks = cfg.SCROLL_TICKS
+                            pyautogui.scroll(-ticks if res.scroll_delta > 0 else ticks)
+                        elif gesture == G_VOLUME and res.volume_level is not None:
+                            volume.set_level(res.volume_level)
+                            active_volume_pct = res.volume_level * 100.0
+                        else:
+                            if gesture != G_VOLUME:
+                                active_volume_pct = None
+                    except pyautogui.FailSafeException:
+                        failsafe_triggered = True
+                        break
 
                     # ---- visual skeleton + pinch meters --------------- #
                     draw_landmarks(frame, norm_pts, cfg)
@@ -225,6 +302,11 @@ def run(cfg: Config) -> None:
                 break
             if key == ord("h"):
                 help_on = not help_on
+
+            # 7. periodically re-assert topmost (some WMs drop the flag)
+            frame_count += 1
+            if frame_count % cfg.TOPMOST_REFRESH_FRAMES == 0:
+                make_window_topmost(cfg.WINDOW_NAME)
     except KeyboardInterrupt:
         pass
     finally:
@@ -235,6 +317,9 @@ def run(cfg: Config) -> None:
                 pass
         cap.release()
         cv2.destroyAllWindows()
+        if failsafe_triggered:
+            print("\n[exit] FAIL-SAFE triggered: mouse hit a screen corner. "
+                  "Aborted cleanly.")
         print("\n[exit] gesture control stopped. bye!")
 
 

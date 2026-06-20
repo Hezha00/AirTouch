@@ -41,16 +41,24 @@ class CursorController:
         """
         Feed a raw normalised index-tip position; return the smoothed
         screen-space (x, y) target.
+
+        The target is clamped to a safe inner rectangle
+        ``[margin, screen - margin]`` so the gesture-driven cursor can
+        never land on a screen corner and accidentally trigger
+        PyAutoGUI's fail-safe abort.
         """
         x1, y1, x2, y2 = self.box
+        m = self.cfg.SCREEN_MARGIN
 
-        # Map the active box onto the full screen.
-        tx = float(np.interp(nx, [x1, x2], [0, self.screen_w]))
-        ty = float(np.interp(ny, [y1, y2], [0, self.screen_h]))
+        # Map the active box onto the SAFE inner rectangle of the screen.
+        tx = float(np.interp(nx, [x1, x2], [m, self.screen_w - m]))
+        ty = float(np.interp(ny, [y1, y2], [m, self.screen_h - m]))
 
-        # Clamp so the cursor never escapes the monitor.
-        tx = max(0.0, min(self.screen_w - 1, tx))
-        ty = max(0.0, min(self.screen_h - 1, ty))
+        # Clamp to the safe rectangle (in case nx/ny fall outside the box).
+        lo_x, hi_x = float(m), float(self.screen_w - m)
+        lo_y, hi_y = float(m), float(self.screen_h - m)
+        tx = max(lo_x, min(hi_x, tx))
+        ty = max(lo_y, min(hi_y, ty))
 
         a = self.cfg.EMA_ALPHA
         if self._sx is None:
@@ -58,6 +66,10 @@ class CursorController:
         else:
             self._sx = a * tx + (1.0 - a) * self._sx
             self._sy = a * ty + (1.0 - a) * self._sy
+
+        # Final defensive clamp on the smoothed value too.
+        self._sx = max(lo_x, min(hi_x, self._sx))
+        self._sy = max(lo_y, min(hi_y, self._sy))
 
         return self._sx, self._sy
 

@@ -39,6 +39,17 @@ class Config:
     BOX_X_MARGIN: float = 0.30      # 30% margin left & right
     BOX_Y_MARGIN: float = 0.30      # 30% margin top & bottom
 
+    # Safety margin (pixels) kept clear around the screen edges so the
+    # gesture-driven cursor can NEVER reach a corner and accidentally
+    # trigger PyAutoGUI's fail-safe abort.  The fail-safe itself stays
+    # enabled so the user can still abort by physically pushing the mouse
+    # into a corner.
+    SCREEN_MARGIN: int = 20
+
+    # Re-assert the OpenCV window as topmost every N frames (some window
+    # managers drop the topmost flag after focus changes).
+    TOPMOST_REFRESH_FRAMES: int = 60
+
     # ------------------------------------------------------------------ #
     # Click / pinch detection
     # ------------------------------------------------------------------ #
