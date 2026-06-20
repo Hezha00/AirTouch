@@ -1,53 +1,33 @@
 """
 hand_gestures.py
 ================
-Two-handed hand-landmark analysis + gesture state machine.
+Right-hand-only hand-landmark analysis + a level-triggered gesture engine.
 
-------------------------------------------------------------------------------
-RIGHT HAND
-------------------------------------------------------------------------------
-  priority  gesture                  trigger
-  ------    ------                   -------
-   1        VOLUME (up/down)         open palm (all 5 extended); push the
-                                     hand toward the camera => volume up,
-                                     pull it back => volume down
-   2        DRAG                     closed fist (all fingers folded)
-   3        RIGHT CLICK              thumb + index + middle tips all close
-   4        LEFT CLICK               thumb + index tips close (middle away)
-   5        SCROLL                   index + middle extended (ring+pinky
-                                     folded); move hand vertically
-   6        MOVE                     index only
-   7        IDLE                     anything else
+Gestures (priority, highest first):
+  1. VOLUME         open palm (all 5 extended)        -> volume push/pull
+  2. VIRTUAL_KB     closed fist (all fingers folded)  -> toggle on-screen kbd
+  3. RIGHT_CLICK    thumb + middle pinch
+                    (index finger held extended -- cursor FROZEN during
+                     this gesture so index tracking does not move the mouse)
+  4. LEFT_CLICK     thumb + index pinch                -> mouse-button-like
+                    (hold the pinch => left button stays down; release => up;
+                     double-tap the pinch => double click, etc.)
+  5. MOVE           index finger only                  -> move cursor
+  6. IDLE           anything else
 
-------------------------------------------------------------------------------
-LEFT HAND  (single-hand)
-------------------------------------------------------------------------------
-   1        START MENU               open palm (all 5 extended)
-   2        TASK MANAGER             closed fist
-   3        BROWSER                  index + middle "V" (ring + pinky folded)
-   4        IDLE                     anything else
-
-------------------------------------------------------------------------------
-TWO-HAND COMBOS  (override single-hand actions when active)
-------------------------------------------------------------------------------
-   1        LOCK PC                  both fists
-   2        SHOW DESKTOP             both open palms, held stable
-   3        MAXIMIZE WINDOW          both open palms, moving apart
-   4        MINIMIZE WINDOW          both open palms, moving together
+There are NO cooldowns.  Clicks are level-triggered (true mouse-button
+behaviour): the OS button is held down for as long as the pinch is held,
+and lifted when it is released.  A quick pinch+release is a single click,
+two quick pinch+release cycles are a double click, etc.
 
 All distances are computed in MediaPipe's normalised space and divided by
-the hand "reference size" (wrist -> middle-finger MCP) so thresholds stay
-correct at any depth.
-
-Edge-triggered events (clicks, system commands) fire ONCE per gesture
-entry and are gated by per-action cooldowns.  Continuous actions (move,
-drag, scroll, volume) are level-triggered.
+the hand "reference size" (wrist -> middle-finger MCP) so that thresholds
+stay correct at any depth.
 """
 
 from __future__ import annotations
 
 import math
-import time
 from collections import deque
 from dataclasses import dataclass, field
 
@@ -73,39 +53,12 @@ _FINGER_PAIRS = (
 )
 
 # ---- gesture identifiers -------------------------------------------------- #
-# right-hand
 G_IDLE = "Idle"
 G_MOVE = "Move"
-G_LCLICK = "Left Click"
-G_RCLICK = "Right Click"
-G_SCROLL = "Scroll"
-G_DRAG = "Drag"
-G_VOL_UP = "Volume Up"
-G_VOL_DOWN = "Volume Down"
-G_VOLUME = "Volume"          # open palm, stable (no nudge this frame)
-# left-hand single
-G_START = "Start Menu"
-G_TASKMGR = "Task Manager"
-G_BROWSER = "Browser"
-# two-hand combo
-G_NONE = "None"
-G_SHOW_DESKTOP = "Show Desktop"
-G_LOCK = "Lock PC"
-G_MAXIMIZE = "Maximize"
-G_MINIMIZE = "Minimize"
-
-# edge-triggered event tokens (returned to main.py for execution)
-E_LEFT_CLICK = "left_click"
-E_RIGHT_CLICK = "right_click"
-E_VOL_UP = "vol_up"
-E_VOL_DOWN = "vol_down"
-E_START = "start"
-E_TASKMGR = "taskmgr"
-E_BROWSER = "browser"
-E_SHOW_DESKTOP = "show_desktop"
-E_LOCK = "lock"
-E_MAXIMIZE = "maximize"
-E_MINIMIZE = "minimize"
+G_LEFT_CLICK = "Left Click"        # pinch held = button down
+G_RIGHT_CLICK = "Right Click"
+G_VOLUME = "Volume"               # open palm (push/pull handled separately)
+G_VIRTUAL_KB = "Virtual Keyboard" # closed fist
 
 
 # --------------------------------------------------------------------------- #
@@ -129,14 +82,6 @@ class Landmarks:
     @property
     def reference_size(self) -> float:
         return self.dist(WRIST, MIDDLE_MCP) or 1e-6
-
-    @property
-    def palm_center(self) -> tuple[float, float]:
-        cx = (self.x(INDEX_MCP) + self.x(MIDDLE_MCP)
-              + self.x(RING_MCP) + self.x(PINKY_MCP)) / 4.0
-        cy = (self.y(INDEX_MCP) + self.y(MIDDLE_MCP)
-              + self.y(RING_MCP) + self.y(PINKY_MCP)) / 4.0
-        return (cx, cy)
 
 
 # --------------------------------------------------------------------------- #
@@ -177,316 +122,178 @@ def is_fist(lm: Landmarks) -> bool:
 
 
 # --------------------------------------------------------------------------- #
-#  Result
+#  Per-frame result
 # --------------------------------------------------------------------------- #
 @dataclass(slots=True)
-class TwoHandResult:
-    right_name: str = G_IDLE
-    left_name: str = G_IDLE
-    combo_name: str = G_NONE
+class GestureResult:
+    name: str = G_IDLE
 
-    # right-hand continuous signals
-    cursor_target: tuple[float, float] | None = None  # for move OR drag
-    scroll_delta: float = 0.0
-    volume_dir: int = 0            # +1 up, -1 down, 0 none
+    # raw cursor target (normalised index-tip coords), used for MOVE
+    cursor_target: tuple[float, float] | None = None
 
-    # edge-triggered events (main.py executes these)
-    right_click_event: str | None = None     # E_LEFT_CLICK | E_RIGHT_CLICK | None
-    left_system_event: str | None = None     # E_START | E_TASKMGR | E_BROWSER | None
-    combo_event: str | None = None           # E_SHOW_DESKTOP | E_LOCK | E_MAXIMIZE | E_MINIMIZE | None
+    # level-triggered button states (True => button should be DOWN now)
+    left_down: bool = False
+    right_down: bool = False
+    # edge events for this frame (transitions), consumed by main.py
+    left_pressed: bool = False       # pinch just closed  (button-down event)
+    left_released: bool = False      # pinch just opened  (button-up event)
+    right_pressed: bool = False      # right pinch just closed -> single click
+    virtual_kb_toggled: bool = False # fist just formed -> toggle keyboard
 
-    # raw signals for UI
+    # volume: +1 push forward (up), -1 pull back (down), 0 none this frame
+    volume_dir: int = 0
+
+    # raw signals for the UI (pinch meters, palm size)
     pinch_di: float = 1.0       # thumb-index ratio
     pinch_dm: float = 1.0       # thumb-middle ratio
     palm_size: float = 0.0
-    palm_distance: float | None = None  # distance between the two palms
 
 
 # --------------------------------------------------------------------------- #
-#  Two-hand gesture engine
+#  The engine
 # --------------------------------------------------------------------------- #
 @dataclass(slots=True)
-class TwoHandEngine:
+class GestureEngine:
     cfg: Config
 
-    # click edge-trigger arming (right hand)
-    _click_armed: bool = True
-    _last_click_t: float = 0.0
+    # level-triggered button states (persisted across frames)
+    _left_held: bool = False
+    _right_held: bool = False
 
-    # volume push/pull
+    # virtual-keyboard toggle (edge on fist formation)
+    _fist_held: bool = False
+
+    # volume push/pull size history
     _size_history: deque = field(default_factory=lambda: deque(maxlen=Config.VOL_SIZE_HISTORY))
-    _last_vol_t: float = 0.0
-
-    # scroll
-    _scroll_history: deque = field(default_factory=lambda: deque(maxlen=Config.SCROLL_HISTORY))
-
-    # left-hand single system events (edge + cooldown)
-    _last_left_t: float = 0.0
-    _prev_left_name: str = G_IDLE
-
-    # two-hand combos
-    _palm_dist_history: deque = field(default_factory=lambda: deque(maxlen=Config.PALM_DIST_HISTORY))
-    _last_combo_t: float = 0.0
-    _both_open_prev: bool = False
-    _both_fist_prev: bool = False
-    _show_desktop_fired: bool = False
 
     # ------------------------------------------------------------------ #
-    def reset_transient(self) -> None:
-        """Clear frame-to-frame histories (call when a hand disappears)."""
+    def reset(self) -> None:
+        """Clear transient state (call when the hand disappears)."""
         self._size_history.clear()
-        self._scroll_history.clear()
-        self._palm_dist_history.clear()
-        self._show_desktop_fired = False
-        self._both_open_prev = False
-        self._both_fist_prev = False
+        # NOTE: do NOT silently clear _left_held here -- main.py is
+        # responsible for releasing the OS button + resetting these when
+        # the hand is lost, via reset_buttons().
+
+    def reset_buttons(self) -> None:
+        """Force both button states to 'up' (call when hand is lost)."""
+        self._left_held = False
+        self._right_held = False
+        self._fist_held = False
 
     # ------------------------------------------------------------------ #
-    def detect(self,
-               right_lm: Landmarks | None,
-               left_lm: Landmarks | None) -> TwoHandResult:
-        res = TwoHandResult()
-
-        # ---- per-hand gesture names + raw signals ----------------------- #
-        right_name = self._detect_right(right_lm, res) if right_lm else G_IDLE
-        left_name = self._detect_left(left_lm, res) if left_lm else G_IDLE
-        res.right_name = right_name
-        res.left_name = left_name
-
-        # ---- two-hand combo (highest priority) -------------------------- #
-        combo_event = self._detect_combo(right_lm, left_lm, right_name,
-                                         left_name, res)
-        res.combo_event = combo_event
-        if combo_event is not None:
-            res.combo_name = {
-                E_LOCK: G_LOCK,
-                E_SHOW_DESKTOP: G_SHOW_DESKTOP,
-                E_MAXIMIZE: G_MAXIMIZE,
-                E_MINIMIZE: G_MINIMIZE,
-            }.get(combo_event, G_NONE)
-            # combo active -> suppress single-hand edge events this frame
-            res.right_click_event = None
-            res.left_system_event = None
-            return res
-
-        # ---- single-hand edge events (only when no combo) --------------- #
-        # right-hand click edge
-        if right_lm is not None:
-            res.right_click_event = self._right_click_event(right_lm, right_name)
-        # left-hand system edge
-        if left_lm is not None:
-            res.left_system_event = self._left_system_event(left_name)
-
-        return res
-
-    # ================================================================== #
-    #  RIGHT HAND  --  classify only (no side effects here)
-    # ================================================================== #
-    def _detect_right(self, lm: Landmarks, res: TwoHandResult) -> str:
+    def detect(self, lm: Landmarks) -> GestureResult:
+        res = GestureResult()
         st = finger_states(lm)
         thumb, index, middle, ring, pinky = st
         ref = lm.reference_size
         res.palm_size = ref
 
+        # normalised pinch ratios (depth-invariant)
         di = lm.dist(THUMB_TIP, INDEX_TIP) / ref
         dm = lm.dist(THUMB_TIP, MIDDLE_TIP) / ref
         res.pinch_di = di
         res.pinch_dm = dm
 
-        # cursor target: index tip for MOVE, palm center for DRAG
-        res.cursor_target = lm.palm_center
+        # index tip is the cursor driver (for MOVE)
+        res.cursor_target = (lm.x(INDEX_TIP), lm.y(INDEX_TIP))
 
-        # 1. VOLUME : open palm
+        # hysteresis on each pinch to prevent button flutter
+        th = self.cfg.PINCH_THRESHOLD
+        rel = self.cfg.PINCH_RELEASE
+
+        # ---- 1. VOLUME : open palm ------------------------------------- #
         if thumb and index and middle and ring and pinky:
             res.volume_dir = self._volume_direction(ref)
-            self._scroll_history.clear()
-            if res.volume_dir > 0:
-                return G_VOL_UP
-            if res.volume_dir < 0:
-                return G_VOL_DOWN
-            return G_VOLUME
-
-        # not volume -> clear size history so a later volume entry is clean
+            res.name = G_VOLUME
+            # while in volume mode, make sure no button is held
+            self._release_any_button(res)
+            return res
+        # leaving volume -> clear size history so a re-entry is clean
         self._size_history.clear()
 
-        # 2. DRAG : closed fist
+        # ---- 2. VIRTUAL KEYBOARD : closed fist (edge toggle) ----------- #
         if is_fist(lm):
-            self._scroll_history.clear()
-            return G_DRAG
+            res.name = G_VIRTUAL_KB
+            if not self._fist_held:
+                self._fist_held = True
+                res.virtual_kb_toggled = True
+            self._release_any_button(res)
+            return res
+        # fist released
+        self._fist_held = False
 
-        # 3. RIGHT CLICK : thumb + index + middle tips all close
-        if di < self.cfg.PINCH_THRESHOLD and dm < self.cfg.PINCH_THRESHOLD:
-            self._scroll_history.clear()
-            return G_RCLICK
+        # ---- 3. RIGHT CLICK : thumb + middle pinch --------------------- #
+        # Per the user's spec: when right-clicking, the INDEX finger is
+        # held EXTENDED and the THUMB pinches the MIDDLE finger.  When the
+        # thumb pinches the middle, it often ends up near the index too,
+        # so we disambiguate by requiring the middle pinch to be TIGHTER
+        # than the index pinch (dm < di), not by requiring di to be large.
+        # The cursor is FROZEN during this gesture (main.py skips the
+        # cursor update when gesture == G_RIGHT_CLICK) so the extended
+        # index finger does not drift the pointer.
+        if index and dm < th and dm < di:
+            res.name = G_RIGHT_CLICK
+            if not self._right_held:
+                self._right_held = True
+                res.right_pressed = True
+            # release any left button while right-clicking
+            if self._left_held:
+                self._left_held = False
+                res.left_released = True
+            return res
+        # right pinch released (hysteresis)
+        if self._right_held and dm > rel:
+            self._right_held = False
 
-        # 4. LEFT CLICK : thumb + index close, middle away
-        if index and di < self.cfg.PINCH_THRESHOLD and dm >= self.cfg.PINCH_THRESHOLD:
-            self._scroll_history.clear()
-            return G_LCLICK
+        # ---- 4. LEFT CLICK : thumb + index pinch (mouse-like hold) ----- #
+        # Level-triggered: pinch held => left button DOWN; release => UP.
+        # A quick pinch+release = one click; two quick cycles = double click.
+        # Require the index pinch to be tighter than the middle pinch
+        # (di <= dm) so this does not collide with the right-click.
+        if di < th and di <= dm:
+            res.name = G_LEFT_CLICK
+            if not self._left_held:
+                self._left_held = True
+                res.left_pressed = True
+            return res
+        # left pinch released (hysteresis)
+        if self._left_held and di > rel:
+            self._left_held = False
+            res.left_released = True
 
-        # 5. SCROLL : index + middle extended, ring + pinky folded
-        if index and middle and not ring and not pinky:
-            res.scroll_delta = self._scroll_delta(lm.y(MIDDLE_MCP))
-            return G_SCROLL
-
-        # not scroll -> clear scroll history
-        self._scroll_history.clear()
-
-        # 6. MOVE : index only
+        # ---- 5. MOVE : index only -------------------------------------- #
         if index and not middle and not ring and not pinky:
-            return G_MOVE
+            res.name = G_MOVE
+            res.left_down = self._left_held    # carry button state for HUD
+            return res
 
-        return G_IDLE
-
-    # ------------------------------------------------------------------ #
-    def _right_click_event(self, lm: Landmarks, name: str) -> str | None:
-        """Edge-trigger: fire one click per pinch entry."""
-        di = lm.dist(THUMB_TIP, INDEX_TIP) / lm.reference_size
-        armed_thresh = self.cfg.PINCH_ARM_THRESHOLD
-
-        # re-arm when the pinch is clearly released
-        if di > armed_thresh:
-            self._click_armed = True
-
-        if name in (G_LCLICK, G_RCLICK) and self._click_armed:
-            if (time.time() - self._last_click_t) >= self.cfg.CLICK_COOLDOWN:
-                self._click_armed = False
-                self._last_click_t = time.time()
-                return E_LEFT_CLICK if name == G_LCLICK else E_RIGHT_CLICK
-        return None
-
-    # ================================================================== #
-    #  LEFT HAND  --  single-hand classification
-    # ================================================================== #
-    def _detect_left(self, lm: Landmarks, res: TwoHandResult) -> str:
-        st = finger_states(lm)
-        thumb, index, middle, ring, pinky = st
-
-        # 1. START MENU : open palm
-        if thumb and index and middle and ring and pinky:
-            return G_START
-
-        # 2. TASK MANAGER : fist
-        if is_fist(lm):
-            return G_TASKMGR
-
-        # 3. BROWSER : index + middle V (ring + pinky folded)
-        if index and middle and not ring and not pinky:
-            return G_BROWSER
-
-        return G_IDLE
+        # ---- 6. IDLE --------------------------------------------------- #
+        res.name = G_IDLE
+        res.left_down = self._left_held
+        return res
 
     # ------------------------------------------------------------------ #
-    def _left_system_event(self, name: str) -> str | None:
-        """Edge-trigger on entering a left-hand gesture + cooldown."""
-        if name == self._prev_left_name:
-            # held -> no repeat (edge only)
-            return None
-        self._prev_left_name = name
-        if name == G_IDLE:
-            return None
-        if (time.time() - self._last_left_t) >= self.cfg.SYSTEM_COOLDOWN:
-            self._last_left_t = time.time()
-            return {
-                G_START: E_START,
-                G_TASKMGR: E_TASKMGR,
-                G_BROWSER: E_BROWSER,
-            }.get(name)
-        return None
+    def _release_any_button(self, res: GestureResult) -> None:
+        """Drop any held buttons (used when entering volume / fist modes)."""
+        if self._left_held:
+            self._left_held = False
+            res.left_released = True
+        if self._right_held:
+            self._right_held = False
 
-    # ================================================================== #
-    #  TWO-HAND COMBOS
-    # ================================================================== #
-    def _detect_combo(self,
-                      right_lm: Landmarks | None,
-                      left_lm: Landmarks | None,
-                      right_name: str,
-                      left_name: str,
-                      res: TwoHandResult) -> str | None:
-        if right_lm is None or left_lm is None:
-            self._both_open_prev = False
-            self._both_fist_prev = False
-            self._show_desktop_fired = False
-            self._palm_dist_history.clear()
-            return None
-
-        res.palm_distance = math.dist(right_lm.palm_center, left_lm.palm_center)
-        self._palm_dist_history.append(res.palm_distance)
-
-        right_fist = (right_name == G_DRAG)
-        left_fist = (left_name == G_TASKMGR)
-        right_open = (right_name in (G_VOLUME, G_VOL_UP, G_VOL_DOWN))
-        left_open = (left_name == G_START)
-
-        # ---- 1. both fists -> LOCK (edge) ------------------------------- #
-        if right_fist and left_fist:
-            if not self._both_fist_prev:
-                self._both_fist_prev = True
-                if (time.time() - self._last_combo_t) >= self.cfg.SYSTEM_COOLDOWN:
-                    self._last_combo_t = time.time()
-                    return E_LOCK
-            return None
-        self._both_fist_prev = False
-
-        # ---- 2. both open palms -> maximize / minimize / show desktop --- #
-        if right_open and left_open:
-            if len(self._palm_dist_history) >= self.cfg.PALM_DIST_HISTORY:
-                delta = self._palm_dist_history[-1] - self._palm_dist_history[0]
-                if delta > self.cfg.PALM_MOTION_DELTA:
-                    # palms moving apart -> maximize (cooldown-gated)
-                    self._show_desktop_fired = True   # suppress show-desktop until released
-                    if (time.time() - self._last_combo_t) >= self.cfg.SYSTEM_COOLDOWN:
-                        self._last_combo_t = time.time()
-                        self._palm_dist_history.clear()
-                        return E_MAXIMIZE
-                elif delta < -self.cfg.PALM_MOTION_DELTA:
-                    # palms moving together -> minimize (cooldown-gated)
-                    self._show_desktop_fired = True
-                    if (time.time() - self._last_combo_t) >= self.cfg.SYSTEM_COOLDOWN:
-                        self._last_combo_t = time.time()
-                        self._palm_dist_history.clear()
-                        return E_MINIMIZE
-                else:
-                    # stable -> show desktop, fires ONCE per both-open entry
-                    if (not self._show_desktop_fired
-                            and (time.time() - self._last_combo_t) >= self.cfg.SYSTEM_COOLDOWN):
-                        self._show_desktop_fired = True
-                        self._last_combo_t = time.time()
-                        return E_SHOW_DESKTOP
-            return None
-
-        # neither combo pose -> re-arm everything
-        self._both_open_prev = False
-        self._show_desktop_fired = False
-        self._palm_dist_history.clear()
-        return None
-
-    # ================================================================== #
-    #  Continuous-signal helpers
-    # ================================================================== #
+    # ------------------------------------------------------------------ #
+    #  Volume push / pull
+    # ------------------------------------------------------------------ #
     def _volume_direction(self, ref: float) -> int:
         """+1 if hand growing (push forward), -1 if shrinking (pull back)."""
         self._size_history.append(ref)
         if len(self._size_history) < self.cfg.VOL_SIZE_HISTORY:
             return 0
         delta = self._size_history[-1] - self._size_history[0]
-        now = time.time()
-        if delta > self.cfg.VOL_SIZE_DELTA and (now - self._last_vol_t) >= self.cfg.VOLUME_COOLDOWN:
-            self._last_vol_t = now
+        if delta > self.cfg.VOL_SIZE_DELTA:
             self._size_history.clear()
             return 1
-        if delta < -self.cfg.VOL_SIZE_DELTA and (now - self._last_vol_t) >= self.cfg.VOLUME_COOLDOWN:
-            self._last_vol_t = now
+        if delta < -self.cfg.VOL_SIZE_DELTA:
             self._size_history.clear()
             return -1
         return 0
-
-    def _scroll_delta(self, ny: float) -> float:
-        self._scroll_history.append(ny)
-        if len(self._scroll_history) < self.cfg.SCROLL_HISTORY:
-            return 0.0
-        delta = self._scroll_history[-1] - self._scroll_history[0]
-        if abs(delta) < self.cfg.SCROLL_THRESHOLD:
-            return 0.0
-        self._scroll_history.clear()
-        return delta

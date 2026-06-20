@@ -26,14 +26,8 @@ import pyautogui
 from config import Config
 from cursor_controller import CursorController
 from hand_gestures import (
-    TwoHandEngine, Landmarks,
-    G_IDLE, G_MOVE, G_LCLICK, G_RCLICK, G_SCROLL, G_DRAG,
-    G_VOL_UP, G_VOL_DOWN, G_VOLUME,
-    G_START, G_TASKMGR, G_BROWSER,
-    G_NONE, G_SHOW_DESKTOP, G_LOCK, G_MAXIMIZE, G_MINIMIZE,
-    E_LEFT_CLICK, E_RIGHT_CLICK, E_VOL_UP, E_VOL_DOWN,
-    E_START, E_TASKMGR, E_BROWSER,
-    E_SHOW_DESKTOP, E_LOCK, E_MAXIMIZE, E_MINIMIZE,
+    GestureEngine, Landmarks,
+    G_IDLE, G_MOVE, G_LEFT_CLICK, G_RIGHT_CLICK, G_VOLUME, G_VIRTUAL_KB,
 )
 from hand_tracker import create_hand_tracker
 from ui import (
@@ -152,13 +146,20 @@ def draw_banner(frame: np.ndarray, text: str, sub: str = "",
 # --------------------------------------------------------------------------- #
 #  System-command helpers
 # --------------------------------------------------------------------------- #
-def open_default_browser() -> None:
-    """Open the system's default web browser to its home page."""
-    import webbrowser
+def toggle_virtual_keyboard() -> None:
+    """
+    Toggle the Windows touch keyboard (osk.exe) on/off.
+
+    We simply launch osk.exe; Windows brings it to the front if it is
+    already running, and the user can close it from its own UI.  This
+    avoids trying to detect/kill a process (which needs admin on some
+    setups) and keeps the gesture reliable.
+    """
+    import subprocess
     try:
-        webbrowser.open("https://www.google.com")
+        subprocess.Popen("osk.exe", shell=True)
     except Exception as e:
-        print(f"[warn] could not open browser: {e}")
+        print(f"[warn] could not launch virtual keyboard: {e}")
 
 
 # --------------------------------------------------------------------------- #
@@ -168,7 +169,7 @@ def run(cfg: Config) -> None:
     configure_pyautogui(cfg)
 
     cursor = CursorController(cfg)
-    engine = TwoHandEngine(cfg=cfg)
+    engine = GestureEngine(cfg=cfg)
 
     print(f"[init] screen resolution : {cursor.screen_w} x {cursor.screen_h}")
     print(f"[init] camera            : index {cfg.CAMERA_INDEX}, "
@@ -208,11 +209,13 @@ def run(cfg: Config) -> None:
     frame_count = 0
     failsafe_triggered = False
 
-    # drag state machine (right-hand fist)
-    dragging = False
     # display volume level (0..1) for the on-screen indicator
     vol_display: float = 0.5
     vol_indicator_dir = 0   # +1/-1/0 shown this frame
+
+    # current OS left-button state (mirrors engine._left_held so we can
+    # guarantee a mouseUp on exit / hand-loss / failsafe)
+    os_left_down = False
 
     try:
         while True:
@@ -229,140 +232,92 @@ def run(cfg: Config) -> None:
             # 1. mirror for a natural "selfie" feel
             frame = cv2.flip(frame, 1)
 
-            right_gesture = G_IDLE
-            left_gesture = G_IDLE
-            combo_name = G_NONE
+            gesture = G_IDLE
             vol_indicator_dir = 0
-            right_present = False
-            left_present = False
-            right_lm = None
-            left_lm = None
-            right_pts = None
-            left_pts = None
+            hand_present = False
+            hand_lm = None
+            hand_pts = None
 
             if tracker is not None:
                 frame_ts = int(time.time() * 1000)
                 hands = tracker.process(frame, frame_ts)
 
-                for hand in hands:
+                if hands:
+                    # use the first (strongest) hand
+                    hand = hands[0]
                     norm_pts = hand["landmarks"]
-                    handedness = hand["handedness"]
-                    if handedness == "Right":
-                        right_present = True
-                        right_lm = Landmarks(pts=norm_pts)
-                        right_pts = norm_pts
-                    elif handedness == "Left":
-                        left_present = True
-                        left_lm = Landmarks(pts=norm_pts)
-                        left_pts = norm_pts
+                    hand_lm = Landmarks(pts=norm_pts)
+                    hand_pts = norm_pts
+                    hand_present = True
 
-                # ---- run the two-hand engine -------------------------------- #
-                res = engine.detect(right_lm, left_lm)
-                right_gesture = res.right_name
-                left_gesture = res.left_name
-                combo_name = res.combo_name
+                    # run the gesture engine on this hand
+                    res = engine.detect(hand_lm)
+                    gesture = res.name
 
-                # ---- execute actions (guarded against failsafe) ----------- #
-                try:
-                    # COMBO overrides everything
-                    if res.combo_event is not None:
-                        # release any active drag before a system action
-                        if dragging:
+                    # ---- execute actions (guarded against failsafe) ------- #
+                    try:
+                        # 1. VOLUME push/pull
+                        if gesture == G_VOLUME:
+                            if res.volume_dir > 0:
+                                pyautogui.press("volumeup")
+                                vol_display = min(1.0, vol_display + cfg.VOL_STEP)
+                                vol_indicator_dir = 1
+                            elif res.volume_dir < 0:
+                                pyautogui.press("volumedown")
+                                vol_display = max(0.0, vol_display - cfg.VOL_STEP)
+                                vol_indicator_dir = -1
+
+                        # 2. VIRTUAL KEYBOARD toggle (edge on fist)
+                        elif gesture == G_VIRTUAL_KB:
+                            if res.virtual_kb_toggled:
+                                toggle_virtual_keyboard()
+
+                        # 3. RIGHT CLICK (single fire on pinch close)
+                        elif gesture == G_RIGHT_CLICK:
+                            if res.right_pressed:
+                                pyautogui.rightClick()
+                            # cursor is intentionally NOT updated here:
+                            # the index finger is extended but we freeze
+                            # the mouse during the right-click so the
+                            # pointer does not drift.
+
+                        # 4. LEFT CLICK (mouse-button-like hold)
+                        elif gesture == G_LEFT_CLICK:
+                            if res.left_pressed and not os_left_down:
+                                pyautogui.mouseDown(button="left")
+                                os_left_down = True
+                            # while held, do NOT move the cursor (the user
+                            # is clicking, not dragging from a move pose).
+                            # A pinch-and-hold = button stays down.
+                            # Releasing the pinch transitions to IDLE/MOVE
+                            # and fires left_released below.
+
+                        # 5. MOVE
+                        elif gesture == G_MOVE:
+                            if res.cursor_target is not None:
+                                sx, sy = cursor.update(*res.cursor_target)
+                                cursor.move_to(sx, sy)
+                                last_cursor = (int(sx), int(sy))
+
+                        # Handle left-button release (fires when the pinch
+                        # opens, regardless of current gesture).
+                        if res.left_released and os_left_down:
                             pyautogui.mouseUp(button="left")
-                            dragging = False
-                        ev = res.combo_event
-                        if ev == E_LOCK:
-                            pyautogui.hotkey("win", "l")
-                        elif ev == E_SHOW_DESKTOP:
-                            pyautogui.hotkey("win", "d")
-                        elif ev == E_MAXIMIZE:
-                            pyautogui.hotkey("win", "up")
-                        elif ev == E_MINIMIZE:
-                            pyautogui.hotkey("win", "down")
-                    else:
-                        # ---- RIGHT HAND continuous + drag ---- #
-                        if right_present:
-                            # drag state machine
-                            if right_gesture == G_DRAG:
-                                if not dragging:
-                                    pyautogui.mouseDown(button="left")
-                                    dragging = True
-                                # move cursor to palm centre while dragging
-                                if res.cursor_target is not None:
-                                    sx, sy = cursor.update(*res.cursor_target)
-                                    cursor.move_to(sx, sy)
-                                    last_cursor = (int(sx), int(sy))
-                            else:
-                                if dragging:
-                                    pyautogui.mouseUp(button="left")
-                                    dragging = False
-                                # normal move
-                                if right_gesture == G_MOVE and res.cursor_target is not None:
-                                    sx, sy = cursor.update(*res.cursor_target)
-                                    cursor.move_to(sx, sy)
-                                    last_cursor = (int(sx), int(sy))
-                                # scroll
-                                if right_gesture == G_SCROLL and res.scroll_delta != 0.0:
-                                    ticks = cfg.SCROLL_TICKS
-                                    pyautogui.scroll(-ticks if res.scroll_delta > 0 else ticks)
-                                # volume direction
-                                if right_gesture in (G_VOL_UP, G_VOL_DOWN, G_VOLUME):
-                                    if res.volume_dir > 0:
-                                        pyautogui.press("volumeup")
-                                        vol_display = min(1.0, vol_display + cfg.VOL_STEP)
-                                        vol_indicator_dir = 1
-                                    elif res.volume_dir < 0:
-                                        pyautogui.press("volumedown")
-                                        vol_display = max(0.0, vol_display - cfg.VOL_STEP)
-                                        vol_indicator_dir = -1
-                                    else:
-                                        vol_indicator_dir = 0
-                                # edge click
-                                if res.right_click_event == E_LEFT_CLICK:
-                                    pyautogui.click(button="left")
-                                elif res.right_click_event == E_RIGHT_CLICK:
-                                    pyautogui.click(button="right")
-                        else:
-                            # right hand gone -> release drag + reset cursor
-                            if dragging:
-                                pyautogui.mouseUp(button="left")
-                                dragging = False
-                            cursor.reset()
-                            engine.reset_transient()
+                            os_left_down = False
 
-                        # ---- LEFT HAND single system events ---- #
-                        if left_present:
-                            ev = res.left_system_event
-                            if ev == E_START:
-                                pyautogui.press("win")
-                            elif ev == E_TASKMGR:
-                                pyautogui.hotkey("ctrl", "shift", "esc")
-                            elif ev == E_BROWSER:
-                                open_default_browser()
-                        else:
-                            # left hand gone -> reset its edge memory
-                            engine._prev_left_name = G_IDLE
-                except pyautogui.FailSafeException:
-                    failsafe_triggered = True
-
-                # ---- draw both skeletons ---- #
-                if right_pts is not None:
-                    draw_landmarks(frame, right_pts, cfg,
-                                   color=cfg.RIGHT_HAND_COLOR)
-                    draw_hand_label(frame, right_pts, "R",
-                                    right_gesture, cfg)
-                    # pinch meter on the index tip (right-hand clicks)
-                    if right_lm is not None:
-                        h, w = frame.shape[:2]
-                        ix, iy = int(right_lm.x(8) * w), int(right_lm.y(8) * h)
-                        draw_pinch_meter(frame, ix, iy,
-                                         res.pinch_di,
-                                         cfg.PINCH_THRESHOLD, cfg)
-                if left_pts is not None:
-                    draw_landmarks(frame, left_pts, cfg,
-                                   color=cfg.LEFT_HAND_COLOR)
-                    draw_hand_label(frame, left_pts, "L",
-                                    left_gesture, cfg)
+                    except pyautogui.FailSafeException:
+                        failsafe_triggered = True
+                else:
+                    # hand lost -> lift any held button + reset cursor EMA
+                    if os_left_down:
+                        try:
+                            pyautogui.mouseUp(button="left")
+                        except Exception:
+                            pass
+                        os_left_down = False
+                    engine.reset_buttons()
+                    engine.reset()
+                    cursor.reset()
             else:
                 # Hand tracking unavailable -> still show the live feed.
                 draw_banner(
@@ -383,10 +338,24 @@ def run(cfg: Config) -> None:
                 px, py = pyautogui.position()
                 last_cursor = (px, py)
             draw_bounding_box(frame, cfg)
-            draw_status(frame, cfg, right_gesture, left_gesture,
-                        combo_name, last_cursor, fps)
-            if right_gesture in (G_VOL_UP, G_VOL_DOWN, G_VOLUME):
+            draw_status(frame, cfg, gesture, last_cursor, fps, os_left_down)
+            if gesture == G_VOLUME:
                 draw_volume_indicator(frame, vol_indicator_dir)
+
+            # draw the hand skeleton + label
+            if hand_pts is not None:
+                draw_landmarks(frame, hand_pts, cfg, color=cfg.HAND_COLOR)
+                draw_hand_label(frame, hand_pts, gesture, cfg)
+                if hand_lm is not None:
+                    h, w = frame.shape[:2]
+                    ix, iy = int(hand_lm.x(8) * w), int(hand_lm.y(8) * h)
+                    draw_pinch_meter(frame, ix, iy,
+                                     res.pinch_di if hand_present else 1.0,
+                                     cfg.PINCH_THRESHOLD, cfg, label="L")
+                    mx, my = int(hand_lm.x(12) * w), int(hand_lm.y(12) * h)
+                    draw_pinch_meter(frame, mx, my,
+                                     res.pinch_dm if hand_present else 1.0,
+                                     cfg.PINCH_THRESHOLD, cfg, label="R")
 
             # 5. help overlay (drawn last so it sits on top, FIXED size)
             if help_on:
@@ -407,8 +376,8 @@ def run(cfg: Config) -> None:
     except KeyboardInterrupt:
         pass
     finally:
-        # always release the mouse button if a drag was in progress
-        if dragging:
+        # always release the mouse button if it was held
+        if os_left_down:
             try:
                 pyautogui.mouseUp(button="left")
             except Exception:
