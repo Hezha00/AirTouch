@@ -3,7 +3,7 @@
 import { motion } from "framer-motion";
 import {
   Hand, MousePointerClick, Volume2, Github, Download, ChevronRight,
-  Music, Sparkles, ArrowRight, Palette, Fingerprint, Piano as PianoIcon,
+  Music, Sparkles, ArrowRight, Palette, Fingerprint, Piano as PianoIcon, Presentation,
 } from "lucide-react";
 import { useHub } from "@/lib/gesture/hub-context";
 import { cn } from "@/lib/utils";
@@ -46,13 +46,22 @@ const TOOLS = [
     glow: "from-orange-500/30",
   },
   {
+    id: "presenter" as const,
+    icon: Presentation,
+    title: "Air Presenter",
+    tagline: "Present slides with your hands",
+    desc: "A gesture-controlled slide deck. Pinch to advance, fist to go back, open palm for a glowing pointer, point for a laser dot. Full-screen kiosk mode + clickable thumbnails as a fallback.",
+    color: "text-chart-3",
+    glow: "from-amber-500/30",
+  },
+  {
     id: "lab" as const,
     icon: Fingerprint,
     title: "Hand Lab",
     tagline: "Inspect all 21 landmarks in real time",
     desc: "An educational + developer visualizer: depth-shaded 2D skeleton, a rotating 3D projection, per-finger extension angles, and live FPS. See exactly what MediaPipe sees.",
-    color: "text-chart-3",
-    glow: "from-amber-500/30",
+    color: "text-chart-5",
+    glow: "from-violet-500/30",
   },
 ];
 
@@ -128,14 +137,11 @@ export function Hero() {
           transition={{ duration: 0.8, delay: 0.5 }}
           className="mt-20 grid sm:grid-cols-2 lg:grid-cols-3 gap-5 max-w-5xl mx-auto"
         >
-          {TOOLS.map((t, i) => (
+          {TOOLS.map((t) => (
             <button
               key={t.id}
               onClick={() => go(t.id)}
-              className={cn(
-                "group relative text-left rounded-2xl glass-strong p-6 overflow-hidden hover:-translate-y-1 transition-all duration-300",
-                i === 4 && "lg:col-span-3"
-              )}
+              className="group relative text-left rounded-2xl glass-strong p-6 overflow-hidden hover:-translate-y-1 transition-all duration-300"
             >
               <div className={`absolute -top-12 -right-12 h-40 w-40 rounded-full bg-gradient-to-br ${t.glow} to-transparent blur-2xl opacity-60 group-hover:opacity-100 transition-opacity`} />
               <div className="relative">

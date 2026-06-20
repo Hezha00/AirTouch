@@ -13,6 +13,7 @@ import { CursorControlView } from "@/components/views/cursor-control-view";
 import { OrchestraView } from "@/components/views/orchestra-view";
 import { AirCanvasView } from "@/components/views/air-canvas-view";
 import { PianoView } from "@/components/views/piano-view";
+import { PresenterView } from "@/components/views/presenter-view";
 import { HandLabView } from "@/components/views/hand-lab-view";
 
 function HomeView() {
@@ -39,6 +40,7 @@ function AppShell() {
         {view === "orchestra" && <OrchestraView />}
         {view === "canvas" && <AirCanvasView />}
         {view === "piano" && <PianoView />}
+        {view === "presenter" && <PresenterView />}
         {view === "lab" && <HandLabView />}
       </main>
       {view === "home" && <SiteFooter />}

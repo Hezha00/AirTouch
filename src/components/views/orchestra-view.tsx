@@ -56,24 +56,36 @@ export function OrchestraView() {
   const [tempo, setTempo] = useState(90);
   const [dynamicLevel, setDynamicLevel] = useState(3);
   const [chordName, setChordName] = useState("I");
-  const [scaleIdx, setScaleIdx] = useState(0);
-  const [progIdx, setProgIdx] = useState(0);
+  const loadPref = <T,>(key: string, fallback: T): T => {
+    if (typeof window === "undefined") return fallback;
+    try { const v = localStorage.getItem(key); return v === null ? fallback : JSON.parse(v) as T; } catch { return fallback; }
+  };
+  const [scaleIdx, setScaleIdx] = useState(() => loadPref("orch:scale", 0));
+  const [progIdx, setProgIdx] = useState(() => loadPref("orch:prog", 0));
   const [melodyNote, setMelodyNote] = useState("C5");
   const [melodyDegree, setMelodyDegree] = useState(0);
   const [melodyOn, setMelodyOn] = useState(true);
   const [locked, setLocked] = useState(false);
   const [activeLayers, setActiveLayers] = useState<LayerName[]>(["strings", "piano", "bass", "drums", "lead"]);
-  const [layerVols, setLayerVols] = useState<Record<LayerName, number>>({
+  const [layerVols, setLayerVols] = useState<Record<LayerName, number>>(() => loadPref("orch:vols", {
     strings: 0.5, piano: 0.6, bass: 0.7, drums: 0.7, lead: 0.55,
-  });
-  const [reverbAmt, setReverbAmt] = useState(0.3);
-  const [swingAmt, setSwingAmt] = useState(0);
-  const [octave, setOctave] = useState(0);
+  }));
+  const [reverbAmt, setReverbAmt] = useState(() => loadPref("orch:reverb", 0.3));
+  const [swingAmt, setSwingAmt] = useState(() => loadPref("orch:swing", 0));
+  const [octave, setOctave] = useState(() => loadPref("orch:octave", 0));
   const [showMix, setShowMix] = useState(false);
   const [rightX, setRightX] = useState(0.5);
   const [leftX, setLeftX] = useState(0.5);
   const [leftY, setLeftY] = useState(0.5);
   const [rightY, setRightY] = useState(0.5);
+
+  // persist prefs to localStorage
+  useEffect(() => { localStorage.setItem("orch:scale", JSON.stringify(scaleIdx)); }, [scaleIdx]);
+  useEffect(() => { localStorage.setItem("orch:prog", JSON.stringify(progIdx)); }, [progIdx]);
+  useEffect(() => { localStorage.setItem("orch:vols", JSON.stringify(layerVols)); }, [layerVols]);
+  useEffect(() => { localStorage.setItem("orch:reverb", JSON.stringify(reverbAmt)); }, [reverbAmt]);
+  useEffect(() => { localStorage.setItem("orch:swing", JSON.stringify(swingAmt)); }, [swingAmt]);
+  useEffect(() => { localStorage.setItem("orch:octave", JSON.stringify(octave)); }, [octave]);
 
   /* -------------------------------------------------------------- */
   /*  Per-frame: draw skeletons + drive engine from TWO hands        */
