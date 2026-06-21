@@ -8,7 +8,6 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useHandTracking, type HandState, type Landmark } from "@/lib/gesture/use-hand-tracking";
-import { useI18n } from "@/lib/gesture/i18n-context";
 
 const HAND_CONNECTIONS: [number, number][] = [
   [0, 1], [1, 2], [2, 3], [3, 4],
@@ -28,7 +27,6 @@ function leftClickSignal(lm: Landmark[] | null): { active: boolean; ratio: numbe
 }
 
 export function CursorControlView() {
-  const { t } = useI18n();
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const playgroundRef = useRef<HTMLDivElement>(null);
@@ -228,10 +226,10 @@ export function CursorControlView() {
         {/* header */}
         <div className="mb-8">
           <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">
-            {t("tool.cursor.title")}
+            Cursor <span className="text-gradient">Control</span>
           </h1>
           <p className="mt-2 text-muted-foreground max-w-2xl text-sm">
-            {t("desc.cursor")}
+            A touchless mouse you control with your hand. Point with your index finger to move, tuck your thumb to the base of your index finger to click. Drag the card, flip the switch, and paint on the canvas.
           </p>
         </div>
 
@@ -274,26 +272,26 @@ export function CursorControlView() {
               {!running ? (
                 <button onClick={start} disabled={loading} className="col-span-2 flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-primary text-primary-foreground font-medium hover:brightness-110 transition-all hover:glow-emerald disabled:opacity-50">
                   {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Camera className="h-5 w-5" />}
-                  {loading ? t("view.loading") : t("view.start")}
+                  {loading ? "Loading…" : "Start Camera"}
                 </button>
               ) : (
                 <button onClick={stop} className="col-span-2 flex items-center justify-center gap-2 px-4 py-3 rounded-xl glass text-foreground font-medium hover:bg-white/10 transition-all">
-                  <CameraOff className="h-5 w-5" /> {t("view.stop")}
+                  <CameraOff className="h-5 w-5" /> Stop
                 </button>
               )}
               <div className="rounded-xl glass p-3 text-center">
                 <div className="text-2xl font-bold text-primary tabular-nums">{clickCount}</div>
-                <div className="text-xs text-muted-foreground">{t("view.clicks")}</div>
+                <div className="text-xs text-muted-foreground">clicks</div>
               </div>
               <div className="rounded-xl glass p-3 text-center">
                 <div className={cn("text-2xl font-bold tabular-nums", leftHeld ? "text-primary" : "text-muted-foreground")}>{leftHeld ? "DOWN" : "up"}</div>
-                <div className="text-xs text-muted-foreground">{t("view.leftBtn")}</div>
+                <div className="text-xs text-muted-foreground">left button</div>
               </div>
             </div>
 
             {/* gesture hint */}
             <div className="rounded-xl glass p-4 text-sm space-y-2">
-              <p className="font-medium flex items-center gap-2"><Hand className="h-4 w-4 text-primary" /> {t("view.howToUse")}</p>
+              <p className="font-medium flex items-center gap-2"><Hand className="h-4 w-4 text-primary" /> How to use</p>
               <ul className="text-muted-foreground space-y-1 text-xs">
                 <li>• Point with your <span className="text-foreground">index finger</span> to move the cursor</li>
                 <li>• <span className="text-foreground">Tuck your thumb</span> to the base of your index finger to click</li>

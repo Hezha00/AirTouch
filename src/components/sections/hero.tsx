@@ -6,23 +6,20 @@ import {
   Palette, Fingerprint, Piano as PianoIcon, Languages, FileText, Drum, Music, MousePointerClick,
 } from "lucide-react";
 import { useHub } from "@/lib/gesture/hub-context";
-import { useI18n } from "@/lib/gesture/i18n-context";
-import { cn } from "@/lib/utils";
 
 const TOOLS = [
-  { id: "cursor" as const, icon: MousePointerClick, titleKey: "tool.cursor.title", tagKey: "tool.cursor.tag", descKey: "tool.cursor.desc", color: "text-primary", glow: "from-emerald-500/30" },
-  { id: "canvas" as const, icon: Palette, titleKey: "tool.canvas.title", tagKey: "tool.canvas.tag", descKey: "tool.canvas.desc", color: "text-chart-2", glow: "from-cyan-500/30" },
-  { id: "whiteboard" as const, icon: FileText, titleKey: "tool.whiteboard.title", tagKey: "tool.whiteboard.tag", descKey: "tool.whiteboard.desc", color: "text-chart-3", glow: "from-amber-500/30" },
-  { id: "orchestra" as const, icon: Music, titleKey: "tool.orchestra.title", tagKey: "tool.orchestra.tag", descKey: "tool.orchestra.desc", color: "text-chart-4", glow: "from-fuchsia-500/30" },
-  { id: "piano" as const, icon: PianoIcon, titleKey: "tool.piano.title", tagKey: "tool.piano.tag", descKey: "tool.piano.desc", color: "text-chart-1", glow: "from-orange-500/30" },
-  { id: "drumkit" as const, icon: Drum, titleKey: "tool.drumkit.title", tagKey: "tool.drumkit.tag", descKey: "tool.drumkit.desc", color: "text-chart-5", glow: "from-rose-500/30" },
-  { id: "sign" as const, icon: Languages, titleKey: "tool.sign.title", tagKey: "tool.sign.tag", descKey: "tool.sign.desc", color: "text-chart-5", glow: "from-violet-500/30" },
-  { id: "lab" as const, icon: Fingerprint, titleKey: "tool.lab.title", tagKey: "tool.lab.tag", descKey: "tool.lab.desc", color: "text-chart-2", glow: "from-teal-500/30" },
+  { id: "cursor" as const, icon: MousePointerClick, title: "Cursor Control", tag: "A touchless mouse, in your browser", desc: "Move a virtual cursor with your index finger, click by tucking your thumb, drag cards, toggle switches, and paint on a canvas — all with hand gestures.", color: "text-primary", glow: "from-emerald-500/30" },
+  { id: "canvas" as const, icon: Palette, title: "Air Canvas", tag: "Paint in the air with your finger", desc: "A full-screen gesture drawing studio. Point to paint, pinch to lift the brush, open your hand to erase, make a fist to clear.", color: "text-chart-2", glow: "from-cyan-500/30" },
+  { id: "whiteboard" as const, icon: FileText, title: "Air Whiteboard", tag: "A structured gesture whiteboard", desc: "Multi-page whiteboard with pen, rectangle, circle, line, arrow, and text tools. Pinch to draw, open hand to lift, fist to clear.", color: "text-chart-3", glow: "from-amber-500/30" },
+  { id: "orchestra" as const, icon: Music, title: "AI Conducting Orchestra", tag: "Conduct generative music with both hands", desc: "A real-time procedural music engine powered by Tone.js. Right hand sets tempo & melody; left hand sets dynamics & harmony.", color: "text-chart-4", glow: "from-fuchsia-500/30" },
+  { id: "piano" as const, icon: PianoIcon, title: "Gesture Piano", tag: "Play a virtual piano in the air", desc: "A 1.5-octave keyboard you play by pinching over the keys. Four instruments, volume, octave shift, sustain pedal, and record + playback.", color: "text-chart-1", glow: "from-orange-500/30" },
+  { id: "drumkit" as const, icon: Drum, title: "Air Drumkit", tag: "Play a 6-pad drum kit in the air", desc: "Six synthesized drum pads (kick, snare, hi-hat, two toms, cymbal). Move your hand over a pad and pinch to hit it. Record & playback.", color: "text-chart-5", glow: "from-rose-500/30" },
+  { id: "sign" as const, icon: Languages, title: "Sign Language Trainer", tag: "Learn the ASL alphabet", desc: "An accessibility + education tool. Browse 20 ASL letters, practice mode, or take a timed quiz. Live finger-pattern matching.", color: "text-chart-5", glow: "from-violet-500/30" },
+  { id: "lab" as const, icon: Fingerprint, title: "Hand Lab", tag: "Inspect all 21 landmarks in real time", desc: "An educational + developer visualizer: depth-shaded 2D skeleton, a rotating 3D projection, per-finger extension angles, and live FPS.", color: "text-chart-2", glow: "from-teal-500/30" },
 ];
 
 export function Hero() {
   const { go } = useHub();
-  const { t } = useI18n();
   return (
     <section id="top" className="relative min-h-screen flex items-center justify-center overflow-hidden pt-16">
       <div className="absolute inset-0 grid-bg grid-bg-fade" />
@@ -38,7 +35,7 @@ export function Hero() {
           className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full glass text-xs font-medium text-muted-foreground mb-8"
         >
           <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
-          {t("hero.badge")}
+          A hub for webcam-powered gesture tools · MediaPipe · Tone.js
         </motion.div>
 
         <motion.h1
@@ -47,9 +44,9 @@ export function Hero() {
           transition={{ duration: 0.7, delay: 0.1 }}
           className="text-4xl sm:text-7xl lg:text-8xl font-bold tracking-tighter leading-[0.95]"
         >
-          {t("hero.title1")}
+          Control your PC
           <br />
-          <span className="text-gradient">{t("hero.title2")}</span>
+          with <span className="text-gradient">bare hands</span>
         </motion.h1>
 
         <motion.p
@@ -58,7 +55,7 @@ export function Hero() {
           transition={{ duration: 0.7, delay: 0.2 }}
           className="mt-8 text-lg sm:text-xl text-muted-foreground max-w-2xl mx-auto leading-relaxed"
         >
-          {t("hero.desc")}
+          A growing collection of browser-based tools that turn any webcam into a gesture interface. No install, no accounts, everything runs locally.
         </motion.p>
 
         <motion.div
@@ -72,7 +69,7 @@ export function Hero() {
             className="group flex items-center gap-2 px-6 py-3.5 rounded-xl bg-primary text-primary-foreground font-medium hover:brightness-110 transition-all hover:glow-emerald"
           >
             <Hand className="h-5 w-5" />
-            {t("hero.cta1")}
+            Launch Cursor Control
             <ChevronRight className="h-4 w-4 group-hover:translate-x-1 transition-transform" />
           </button>
           <button
@@ -80,7 +77,7 @@ export function Hero() {
             className="flex items-center gap-2 px-6 py-3.5 rounded-xl glass text-foreground font-medium hover:bg-white/10 transition-all"
           >
             <Palette className="h-5 w-5 text-chart-2" />
-            {t("hero.cta2")}
+            Try Air Canvas
           </button>
         </motion.div>
 
@@ -104,12 +101,12 @@ export function Hero() {
                     <tool.icon className={`h-6 w-6 ${tool.color}`} />
                   </div>
                   <div>
-                    <h3 className="font-bold text-lg">{t(tool.titleKey)}</h3>
-                    <p className={`text-xs ${tool.color}`}>{t(tool.tagKey)}</p>
+                    <h3 className="font-bold text-lg">{tool.title}</h3>
+                    <p className={`text-xs ${tool.color}`}>{tool.tag}</p>
                   </div>
                   <ArrowRight className="h-5 w-5 ml-auto text-muted-foreground group-hover:text-foreground group-hover:translate-x-1 transition-all" />
                 </div>
-                <p className="text-sm text-muted-foreground leading-relaxed">{t(tool.descKey)}</p>
+                <p className="text-sm text-muted-foreground leading-relaxed">{tool.desc}</p>
               </div>
             </button>
           ))}

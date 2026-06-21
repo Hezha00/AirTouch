@@ -1,7 +1,6 @@
 "use client";
 
 import { HubProvider, useHub } from "@/lib/gesture/hub-context";
-import { I18nProvider, useI18n } from "@/lib/gesture/i18n-context";
 import { HubNav } from "@/components/hub-nav";
 import { SiteFooter } from "@/components/site-footer";
 import { Hero } from "@/components/sections/hero";
@@ -39,9 +38,8 @@ function HomeView() {
 
 function AppShell() {
   const { view } = useHub();
-  const { dir } = useI18n();
   return (
-    <div className="relative min-h-screen flex flex-col" dir={dir}>
+    <div className="relative min-h-screen flex flex-col">
       <HubNav />
       <main className="flex-1">
         {view === "home" && <HomeView />}
@@ -61,10 +59,8 @@ function AppShell() {
 
 export default function Home() {
   return (
-    <I18nProvider>
-      <HubProvider>
-        <AppShell />
-      </HubProvider>
-    </I18nProvider>
+    <HubProvider>
+      <AppShell />
+    </HubProvider>
   );
 }
