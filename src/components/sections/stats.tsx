@@ -2,22 +2,24 @@
 
 import { motion } from "framer-motion";
 import { Fingerprint, Zap, Layers, CloudOff } from "lucide-react";
-
-const STATS = [
-  { icon: Fingerprint, value: "21", label: "hand landmarks tracked", color: "text-primary" },
-  { icon: Zap, value: "~10ms", label: "per-frame inference", color: "text-chart-2" },
-  { icon: Layers, value: "7", label: "interactive tools", color: "text-chart-4" },
-  { icon: CloudOff, value: "0", label: "cloud dependencies", color: "text-chart-3" },
-];
+import { useI18n } from "@/lib/gesture/i18n-context";
 
 export function Stats() {
+  const { t } = useI18n();
+  const STATS = [
+    { icon: Fingerprint, value: "21", label: t("stats.landmarks"), color: "text-primary" },
+    { icon: Zap, value: "~10ms", label: t("stats.inference"), color: "text-chart-2" },
+    { icon: Layers, value: "8", label: t("stats.tools"), color: "text-chart-4" },
+    { icon: CloudOff, value: "0", label: t("stats.cloud"), color: "text-chart-3" },
+  ];
+
   return (
     <section className="relative py-12">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {STATS.map((s, i) => (
             <motion.div
-              key={s.label}
+              key={i}
               initial={{ opacity: 0, y: 20 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true, margin: "-50px" }}

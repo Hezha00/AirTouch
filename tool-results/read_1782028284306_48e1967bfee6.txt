@@ -1,0 +1,577 @@
+     1→     1→"use client";
+     2→     2→
+     3→     3→import { useCallback, useEffect, useRef, useState } from "react";
+     4→     4→import { motion, AnimatePresence } from "framer-motion";
+     5→     5→import {
+     6→     6→  Camera, CameraOff, Loader2, Music, Hand, Volume2, Activity,
+     7→     7→  Play, Pause, Lock, Zap, RotateCcw, Sliders, ChevronRight,
+     8→     8→} from "lucide-react";
+     9→     9→import { cn } from "@/lib/utils";
+    10→    10→import {
+    11→    11→  useHandTracking, type HandState, type Landmark, type GestureType,
+    12→    12→} from "@/lib/gesture/use-hand-tracking";
+    13→    13→import {
+    14→    14→  MusicEngine, type LayerName, SCALES, PROGRESSIONS,
+    15→    15→} from "@/lib/gesture/music-engine";
+    16→    16→
+    17→    17→const HAND_CONNECTIONS: [number, number][] = [
+    18→    18→  [0, 1], [1, 2], [2, 3], [3, 4],
+    19→    19→  [0, 5], [5, 6], [6, 7], [7, 8],
+    20→    20→  [5, 9], [9, 10], [10, 11], [11, 12],
+    21→    21→  [9, 13], [13, 14], [14, 15], [15, 16],
+    22→    22→  [13, 17], [17, 18], [18, 19], [19, 20],
+    23→    23→  [0, 17],
+    24→    24→];
+    25→    25→
+    26→    26→const LAYERS: { id: LayerName; label: string; color: string }[] = [
+    27→    27→  { id: "strings", label: "Strings", color: "text-primary" },
+    28→    28→  { id: "piano",   label: "Piano",   color: "text-chart-2" },
+    29→    29→  { id: "bass",    label: "Bass",    color: "text-chart-3" },
+    30→    30→  { id: "drums",   label: "Drums",   color: "text-chart-5" },
+    31→    31→  { id: "lead",    label: "Lead",    color: "text-chart-4" },
+    32→    32→];
+    33→    33→
+    34→    34→const DYN_LABELS = ["pp", "p", "mp", "mf", "f", "ff"];
+    35→    35→
+    36→    36→/* discretize a 0..1 value into N zones, returns zone index 0..N-1 */
+    37→    37→function zone(v: number, n: number) {
+    38→    38→  return Math.max(0, Math.min(n - 1, Math.floor(v * n)));
+    39→    39→}
+    40→    40→
+    41→    41→export function OrchestraView() {
+    42→    42→  const canvasRef = useRef<HTMLCanvasElement>(null);
+    43→    43→  const engineRef = useRef<MusicEngine | null>(null);
+    44→    44→  const lockedRef = useRef(false);
+    45→    45→  const prevRightGestureRef = useRef<GestureType>("idle");
+    46→    46→  const prevLeftGestureRef = useRef<GestureType>("idle");
+    47→    47→  const videoElRef = useRef<HTMLVideoElement | null>(null);
+    48→    48→
+    49→    49→  const [running, setRunning] = useState(false);
+    50→    50→  const [loading, setLoading] = useState(false);
+    51→    51→  const [error, setError] = useState<string | null>(null);
+    52→    52→  const [rightGesture, setRightGesture] = useState<GestureType>("idle");
+    53→    53→  const [leftGesture, setLeftGesture] = useState<GestureType>("idle");
+    54→    54→  const [rightPresent, setRightPresent] = useState(false);
+    55→    55→  const [leftPresent, setLeftPresent] = useState(false);
+    56→    56→  const [tempo, setTempo] = useState(90);
+    57→    57→  const [dynamicLevel, setDynamicLevel] = useState(3);
+    58→    58→  const [chordName, setChordName] = useState("I");
+    59→    59→  const loadPref = <T,>(key: string, fallback: T): T => {
+    60→    60→    if (typeof window === "undefined") return fallback;
+    61→    61→    try { const v = localStorage.getItem(key); return v === null ? fallback : JSON.parse(v) as T; } catch { return fallback; }
+    62→    62→  };
+    63→    63→  const [scaleIdx, setScaleIdx] = useState(() => loadPref("orch:scale", 0));
+    64→    64→  const [progIdx, setProgIdx] = useState(() => loadPref("orch:prog", 0));
+    65→    65→  const [melodyNote, setMelodyNote] = useState("C5");
+    66→    66→  const [melodyDegree, setMelodyDegree] = useState(0);
+    67→    67→  const [melodyOn, setMelodyOn] = useState(true);
+    68→    68→  const [locked, setLocked] = useState(false);
+    69→    69→  const [activeLayers, setActiveLayers] = useState<LayerName[]>(["strings", "piano", "bass", "drums", "lead"]);
+    70→    70→  const [layerVols, setLayerVols] = useState<Record<LayerName, number>>(() => loadPref("orch:vols", {
+    71→    71→    strings: 0.5, piano: 0.6, bass: 0.7, drums: 0.7, lead: 0.55,
+    72→    72→  }));
+    73→    73→  const [reverbAmt, setReverbAmt] = useState(() => loadPref("orch:reverb", 0.3));
+    74→    74→  const [swingAmt, setSwingAmt] = useState(() => loadPref("orch:swing", 0));
+    75→    75→  const [octave, setOctave] = useState(() => loadPref("orch:octave", 0));
+    76→    76→  const [showMix, setShowMix] = useState(false);
+    77→    77→  const [rightX, setRightX] = useState(0.5);
+    78→    78→  const [leftX, setLeftX] = useState(0.5);
+    79→    79→  const [leftY, setLeftY] = useState(0.5);
+    80→    80→  const [rightY, setRightY] = useState(0.5);
+    81→    81→
+    82→    82→  // persist prefs to localStorage
+    83→    83→  useEffect(() => { localStorage.setItem("orch:scale", JSON.stringify(scaleIdx)); }, [scaleIdx]);
+    84→    84→  useEffect(() => { localStorage.setItem("orch:prog", JSON.stringify(progIdx)); }, [progIdx]);
+    85→    85→  useEffect(() => { localStorage.setItem("orch:vols", JSON.stringify(layerVols)); }, [layerVols]);
+    86→    86→  useEffect(() => { localStorage.setItem("orch:reverb", JSON.stringify(reverbAmt)); }, [reverbAmt]);
+    87→    87→  useEffect(() => { localStorage.setItem("orch:swing", JSON.stringify(swingAmt)); }, [swingAmt]);
+    88→    88→  useEffect(() => { localStorage.setItem("orch:octave", JSON.stringify(octave)); }, [octave]);
+    89→    89→
+    90→    90→  /* -------------------------------------------------------------- */
+    91→    91→  /*  Per-frame: draw skeletons + drive engine from TWO hands        */
+    92→    92→  /* -------------------------------------------------------------- */
+    93→    93→  const onHands = useCallback((hands: HandState[], lms: (Landmark[] | null)[]) => {
+    94→    94→    const canvas = canvasRef.current;
+    95→    95→    const video = videoElRef.current;
+    96→    96→    const eng = engineRef.current;
+    97→    97→
+    98→    98→    // identify right & left hands
+    99→    99→    let right: HandState | null = null;
+   100→   100→    let left: HandState | null = null;
+   101→   101→    let rightLm: Landmark[] | null = null;
+   102→   102→    let leftLm: Landmark[] | null = null;
+   103→   103→    for (let i = 0; i < hands.length; i++) {
+   104→   104→      const h = hands[i];
+   105→   105→      if (!h.present) continue;
+   106→   106→      if (h.handedness === "Right" && !right) { right = h; rightLm = lms[i]; }
+   107→   107→      else if (h.handedness === "Left" && !left) { left = h; leftLm = lms[i]; }
+   108→   108→      else if (!right) { right = h; rightLm = lms[i]; }
+   109→   109→      else if (!left) { left = h; leftLm = lms[i]; }
+   110→   110→    }
+   111→   111→
+   112→   112→    setRightPresent(!!right?.present);
+   113→   113→    setLeftPresent(!!left?.present);
+   114→   114→
+   115→   115→    // draw skeletons
+   116→   116→    if (canvas && video) {
+   117→   117→      const ctx = canvas.getContext("2d")!;
+   118→   118→      canvas.width = video.videoWidth || 640;
+   119→   119→      canvas.height = video.videoHeight || 480;
+   120→   120→      ctx.clearRect(0, 0, canvas.width, canvas.height);
+   121→   121→      const drawHand = (lm: Landmark[] | null, color: string) => {
+   122→   122→        if (!lm) return;
+   123→   123→        const w = canvas!.width, hh = canvas!.height;
+   124→   124→        ctx.strokeStyle = color;
+   125→   125→        ctx.lineWidth = 3;
+   126→   126→        ctx.lineCap = "round";
+   127→   127→        for (const [a, b] of HAND_CONNECTIONS) {
+   128→   128→          ctx.beginPath();
+   129→   129→          ctx.moveTo(lm[a].x * w, lm[a].y * hh);
+   130→   130→          ctx.lineTo(lm[b].x * w, lm[b].y * hh);
+   131→   131→          ctx.stroke();
+   132→   132→        }
+   133→   133→        ctx.fillStyle = "rgba(255,210,80,0.95)";
+   134→   134→        for (const p of lm) {
+   135→   135→          ctx.beginPath();
+   136→   136→          ctx.arc(p.x * w, p.y * hh, 5, 0, Math.PI * 2);
+   137→   137→          ctx.fill();
+   138→   138→        }
+   139→   139→      };
+   140→   140→      drawHand(rightLm, "rgba(0,255,140,0.9)");
+   141→   141→      drawHand(leftLm, "rgba(255,120,80,0.9)");
+   142→   142→    }
+   143→   143→
+   144→   144→    if (!eng) return;
+   145→   145→
+   146→   146→    /* ---- RIGHT HAND: tempo + melody ---- */
+   147→   147→    if (right) {
+   148→   148→      setRightGesture(right.gesture);
+   149→   149→      setRightX(right.x);
+   150→   150→      setRightY(right.y);
+   151→   151→      // Y -> tempo (top = fast). 50..180
+   152→   152→      const bpm = 50 + (1 - right.y) * 130;
+   153→   153→      eng.setTempo(bpm);
+   154→   154→      setTempo(Math.round(bpm));
+   155→   155→      // X -> melody degree (7 zones)
+   156→   156→      const n = SCALES[scaleIdx].intervals.length;
+   157→   157→      const deg = zone(right.x, n * 2);
+   158→   158→      eng.setMelodyDegree(deg);
+   159→   159→      setMelodyDegree(deg);
+   160→   160→
+   161→   161→      // gesture edges
+   162→   162→      const g = right.gesture;
+   163→   163→      const prev = prevRightGestureRef.current;
+   164→   164→      if (g !== prev) {
+   165→   165→        if (g === "fist") { eng.setMelodyEnabled(false); setMelodyOn(false); }
+   166→   166→        if (g === "open") { eng.setMelodyEnabled(true); setMelodyOn(true); }
+   167→   167→        if (g === "point") {
+   168→   168→          // accent: re-trigger melody note now
+   169→   169→          eng.setMelodyEnabled(true); setMelodyOn(true);
+   170→   170→        }
+   171→   171→        prevRightGestureRef.current = g;
+   172→   172→      }
+   173→   173→    } else {
+   174→   174→      setRightGesture("idle");
+   175→   175→    }
+   176→   176→
+   177→   177→    /* ---- LEFT HAND: dynamics + progression ---- */
+   178→   178→    if (left) {
+   179→   179→      setLeftGesture(left.gesture);
+   180→   180→      setLeftX(left.x);
+   181→   181→      setLeftY(left.y);
+   182→   182→      // Y -> dynamic level (6 zones, top = ff)
+   183→   183→      const dl = 5 - zone(left.y, 6);
+   184→   184→      eng.setDynamicLevel(dl);
+   185→   185→      setDynamicLevel(dl);
+   186→   186→      // X -> progression (4 zones)
+   187→   187→      const pi = zone(left.x, PROGRESSIONS.length);
+   188→   188→      if (pi !== progIdx) {
+   189→   189→        eng.setProgression(pi);
+   190→   190→        setProgIdx(pi);
+   191→   191→      }
+   192→   192→
+   193→   193→      // gesture edges
+   194→   194→      const g = left.gesture;
+   195→   195→      const prev = prevLeftGestureRef.current;
+   196→   196→      if (g !== prev) {
+   197→   197→        if (g === "open") {
+   198→   198→          // full ensemble
+   199→   199→          (["strings", "piano", "bass", "drums", "lead"] as LayerName[]).forEach((l) => {
+   200→   200→            eng.setLayerVolume(l, layerVols[l] || 0.6);
+   201→   201→          });
+   202→   202→          setActiveLayers((Object.keys(layerVols) as LayerName[]).filter((l) => (layerVols[l] || 0) > 0.01));
+   203→   203→        }
+   204→   204→        if (g === "fist") {
+   205→   205→          // strip to strings only
+   206→   206→          (["piano", "bass", "drums", "lead"] as LayerName[]).forEach((l) => eng.setLayerVolume(l, 0));
+   207→   207→          eng.setLayerVolume("strings", layerVols.strings || 0.6);
+   208→   208→          setActiveLayers(["strings"]);
+   209→   209→        }
+   210→   210→        if (g === "pinch") {
+   211→   211→          lockedRef.current = !lockedRef.current;
+   212→   212→          eng.setLocked(lockedRef.current);
+   213→   213→          setLocked(lockedRef.current);
+   214→   214→        }
+   215→   215→        prevLeftGestureRef.current = g;
+   216→   216→      }
+   217→   217→    } else {
+   218→   218→      setLeftGesture("idle");
+   219→   219→    }
+   220→   220→
+   221→   221→    // sync display state from engine
+   222→   222→    if (eng.state) {
+   223→   223→      setChordName(eng.state.currentChordName);
+   224→   224→      setMelodyNote(eng.state.melodyNote);
+   225→   225→      setActiveLayers([...eng.state.activeLayers]);
+   226→   226→    }
+   227→   227→  }, [scaleIdx, progIdx, layerVols]);
+   228→   228→
+   229→   229→  const tracking = useHandTracking({ onHands, numHands: 2, smoothing: 0.45 });
+   230→   230→  useEffect(() => {
+   231→   231→    videoElRef.current = tracking.videoRef.current;
+   232→   232→  });
+   233→   233→
+   234→   234→  /* -------------------------------------------------------------- */
+   235→   235→  /*  Start / stop                                                  */
+   236→   236→  /* -------------------------------------------------------------- */
+   237→   237→  const start = async () => {
+   238→   238→    setError(null);
+   239→   239→    setLoading(true);
+   240→   240→    try {
+   241→   241→      if (!engineRef.current) {
+   242→   242→        engineRef.current = new MusicEngine();
+   243→   243→        await engineRef.current.init();
+   244→   244→      }
+   245→   245→      // apply current UI state
+   246→   246→      engineRef.current.setScale(scaleIdx);
+   247→   247→      engineRef.current.setProgression(progIdx);
+   248→   248→      engineRef.current.setReverb(reverbAmt);
+   249→   249→      engineRef.current.setSwing(swingAmt);
+   250→   250→      engineRef.current.setOctave(octave);
+   251→   251→      engineRef.current.setDynamicLevel(dynamicLevel);
+   252→   252→      (Object.keys(layerVols) as LayerName[]).forEach((l) => engineRef.current!.setLayerVolume(l, layerVols[l]));
+   253→   253→      engineRef.current.start();
+   254→   254→      await tracking.start();
+   255→   255→      setRunning(true);
+   256→   256→    } catch (e) {
+   257→   257→      setError(e instanceof Error ? e.message : "Failed to start");
+   258→   258→    } finally {
+   259→   259→      setLoading(false);
+   260→   260→    }
+   261→   261→  };
+   262→   262→
+   263→   263→  const stop = () => {
+   264→   264→    tracking.stop();
+   265→   265→    setRunning(false);
+   266→   266→    engineRef.current?.stop();
+   267→   267→    setRightGesture("idle");
+   268→   268→    setLeftGesture("idle");
+   269→   269→    setRightPresent(false);
+   270→   270→    setLeftPresent(false);
+   271→   271→  };
+   272→   272→
+   273→   273→  useEffect(() => {
+   274→   274→    return () => {
+   275→   275→      engineRef.current?.dispose();
+   276→   276→      engineRef.current = null;
+   277→   277→    };
+   278→   278→  }, []);
+   279→   279→
+   280→   280→  /* ---- UI handlers ---- */
+   281→   281→  const onScale = (i: number) => { setScaleIdx(i); engineRef.current?.setScale(i); };
+   282→   282→  const onProg = (i: number) => { setProgIdx(i); engineRef.current?.setProgression(i); };
+   283→   283→  const onLayerVol = (l: LayerName, v: number) => {
+   284→   284→    setLayerVols((s) => ({ ...s, [l]: v }));
+   285→   285→    engineRef.current?.setLayerVolume(l, v);
+   286→   286→  };
+   287→   287→  const onReverb = (v: number) => { setReverbAmt(v); engineRef.current?.setReverb(v); };
+   288→   288→  const onSwing = (v: number) => { setSwingAmt(v); engineRef.current?.setSwing(v); };
+   289→   289→  const onOctave = (v: number) => { setOctave(v); engineRef.current?.setOctave(v); };
+   290→   290→  const onDrop = () => engineRef.current?.triggerDrop();
+   291→   291→  const onPanic = () => {
+   292→   292→    engineRef.current?.stop();
+   293→   293→    setTimeout(() => engineRef.current?.start(), 100);
+   294→   294→  };
+   295→   295→
+   296→   296→  const intensity = dynamicLevel / 5;
+   297→   297→
+   298→   298→  return (
+   299→   299→    <div className="relative min-h-screen pt-16 sm:pt-20 pb-12">
+   300→   300→      {/* ambient background */}
+   301→   301→      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+   302→   302→        <motion.div
+   303→   303→          className="absolute top-1/4 left-1/4 h-96 w-96 rounded-full blur-3xl"
+   304→   304→          style={{ background: `radial-gradient(circle, oklch(0.7 0.2 305 / ${0.15 + intensity * 0.25}), transparent)` }}
+   305→   305→          animate={{ scale: 1 + intensity * 0.3 }}
+   306→   306→          transition={{ duration: 0.4 }}
+   307→   307→        />
+   308→   308→        <motion.div
+   309→   309→          className="absolute bottom-1/4 right-1/4 h-96 w-96 rounded-full blur-3xl"
+   310→   310→          style={{ background: `radial-gradient(circle, oklch(0.72 0.19 155 / ${0.1 + intensity * 0.2}), transparent)` }}
+   311→   311→          animate={{ scale: 1 + intensity * 0.3 }}
+   312→   312→          transition={{ duration: 0.4 }}
+   313→   313→        />
+   314→   314→      </div>
+   315→   315→
+   316→   316→      <div className="relative mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+   317→   317→        {/* header */}
+   318→   318→        <div className="mb-8 text-center">
+   319→   319→          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="inline-flex items-center gap-2 px-3 py-1 rounded-full glass text-xs font-medium text-chart-4 mb-4">
+   320→   320→            <Music className="h-3.5 w-3.5" /> Two-handed conducting · Generative · Tone.js
+   321→   321→          </motion.div>
+   322→   322→          <h1 className="text-4xl sm:text-5xl font-bold tracking-tight">
+   323→   323→            AI Conducting <span className="text-gradient">Orchestra</span>
+   324→   324→          </h1>
+   325→   325→          <p className="mt-3 text-muted-foreground max-w-2xl mx-auto">
+   326→   326→            Conduct a live, procedurally-generated cinematic score with <span className="text-primary">both hands</span>.
+   327→   327→            Right hand sets tempo &amp; melody; left hand sets dynamics &amp; harmony. Every note is synthesized in real time.
+   328→   328→          </p>
+   329→   329→        </div>
+   330→   330→
+   331→   331→        <div className="grid lg:grid-cols-[1.3fr_1fr] gap-6">
+   332→   332→          {/* ---- camera + overlays ---- */}
+   333→   333→          <div className="flex flex-col gap-4">
+   334→   334→            <div className="relative rounded-2xl overflow-hidden glass-strong aspect-video bg-black">
+   335→   335→              <video ref={tracking.videoRef} playsInline muted className="absolute inset-0 h-full w-full object-cover opacity-0" />
+   336→   336→              <canvas ref={canvasRef} className="absolute inset-0 h-full w-full object-cover" />
+   337→   337→
+   338→   338→              {!running && (
+   339→   339→                <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 grid-bg">
+   340→   340→                  <div className="relative">
+   341→   341→                    <div className="absolute inset-0 bg-chart-4/30 blur-2xl rounded-full animate-pulse-glow" />
+   342→   342→                    <Music className="relative h-16 w-16 text-chart-4/70" />
+   343→   343→                  </div>
+   344→   344→                  <p className="text-muted-foreground text-sm max-w-xs text-center">
+   345→   345→                    {loading ? "Loading model + audio engine…" : "Click start to begin conducting"}
+   346→   346→                  </p>
+   347→   347→                  {loading && <Loader2 className="h-5 w-5 animate-spin text-chart-4" />}
+   348→   348→                </div>
+   349→   349→              )}
+   350→   350→
+   351→   351→              <AnimatePresence>
+   352→   352→                {running && (
+   353→   353→                  <>
+   354→   354→                    {/* right hand badge */}
+   355→   355→                    <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="absolute top-3 left-3 flex items-center gap-2 px-3 py-1.5 rounded-lg glass-strong">
+   356→   356→                      <span className={cn("h-2 w-2 rounded-full", rightPresent ? "bg-primary animate-pulse" : "bg-muted-foreground")} />
+   357→   357→                      <span className="text-xs font-medium">R: <span className="capitalize text-primary">{rightGesture}</span></span>
+   358→   358→                    </motion.div>
+   359→   359→                    {/* left hand badge */}
+   360→   360→                    <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="absolute top-3 right-3 flex items-center gap-2 px-3 py-1.5 rounded-lg glass-strong">
+   361→   361→                      <span className={cn("h-2 w-2 rounded-full", leftPresent ? "bg-chart-3 animate-pulse" : "bg-muted-foreground")} />
+   362→   362→                      <span className="text-xs font-medium">L: <span className="capitalize text-chart-3">{leftGesture}</span></span>
+   363→   363→                    </motion.div>
+   364→   364→                    {/* chord + melody */}
+   365→   365→                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute bottom-3 left-3 flex gap-2">
+   366→   366→                      <div className="px-3 py-1.5 rounded-lg glass-strong text-center">
+   367→   367→                        <div className="text-[9px] text-muted-foreground uppercase">Chord</div>
+   368→   368→                        <div className="text-lg font-bold text-chart-3 leading-none">{chordName}</div>
+   369→   369→                      </div>
+   370→   370→                      <div className="px-3 py-1.5 rounded-lg glass-strong text-center">
+   371→   371→                        <div className="text-[9px] text-muted-foreground uppercase">Melody</div>
+   372→   372→                        <div className="text-lg font-bold text-chart-4 leading-none">{melodyNote}</div>
+   373→   373→                      </div>
+   374→   374→                    </motion.div>
+   375→   375→                    {locked && (
+   376→   376→                      <motion.div initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} className="absolute bottom-3 right-3 flex items-center gap-1.5 px-3 py-1.5 rounded-lg glass-strong">
+   377→   377→                        <Lock className="h-3.5 w-3.5 text-chart-3" />
+   378→   378→                        <span className="text-xs">Locked</span>
+   379→   379→                      </motion.div>
+   380→   380→                    )}
+   381→   381→                  </>
+   382→   382→                )}
+   383→   383→              </AnimatePresence>
+   384→   384→
+   385→   385→              {error && (
+   386→   386→                <div className="absolute bottom-3 left-3 right-3 px-4 py-3 rounded-lg bg-destructive/20 border border-destructive/40 text-sm text-destructive">{error}</div>
+   387→   387→              )}
+   388→   388→            </div>
+   389→   389→
+   390→   390→            {/* start/stop + drop + panic */}
+   391→   391→            <div className="grid grid-cols-3 gap-3">
+   392→   392→              {!running ? (
+   393→   393→                <button onClick={start} disabled={loading} className="col-span-3 flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl font-medium hover:brightness-110 transition-all hover:glow-cyan disabled:opacity-50 text-white" style={{ backgroundColor: "oklch(0.62 0.22 305)" }}>
+   394→   394→                  {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Play className="h-5 w-5" />}
+   395→   395→                  {loading ? "Loading…" : "Start Conducting"}
+   396→   396→                </button>
+   397→   397→              ) : (
+   398→   398→                <>
+   399→   399→                  <button onClick={stop} className="col-span-1 flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl glass text-foreground font-medium hover:bg-white/10 transition-all">
+   400→   400→                    <Pause className="h-5 w-5" /> Stop
+   401→   401→                  </button>
+   402→   402→                  <button onClick={onDrop} className="col-span-1 flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl bg-chart-4 text-white font-medium hover:brightness-110 transition-all" style={{ backgroundColor: "oklch(0.62 0.22 305)" }}>
+   403→   403→                    <Zap className="h-5 w-5" /> Drop
+   404→   404→                  </button>
+   405→   405→                  <button onClick={onPanic} className="col-span-1 flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl glass text-foreground font-medium hover:bg-white/10 transition-all">
+   406→   406→                    <RotateCcw className="h-5 w-5" /> Reset
+   407→   407→                  </button>
+   408→   408→                </>
+   409→   409→              )}
+   410→   410→            </div>
+   411→   411→
+   412→   412→            {/* hand role guide */}
+   413→   413→            <div className="grid sm:grid-cols-2 gap-3">
+   414→   414→              <div className="rounded-xl glass p-4">
+   415→   415→                <div className="text-xs font-medium text-primary uppercase tracking-wider mb-2">Right Hand ✋</div>
+   416→   416→                <ul className="text-xs text-muted-foreground space-y-1">
+   417→   417→                  <li>↕ <span className="text-foreground">Height</span> → Tempo (50–180)</li>
+   418→   418→                  <li>↔ <span className="text-foreground">X position</span> → Melody note</li>
+   419→   419→                  <li>✊ <span className="text-foreground">Fist</span> → Mute melody</li>
+   420→   420→                  <li>🖐 <span className="text-foreground">Open</span> → Melody on</li>
+   421→   421→                </ul>
+   422→   422→              </div>
+   423→   423→              <div className="rounded-xl glass p-4">
+   424→   424→                <div className="text-xs font-medium text-chart-3 uppercase tracking-wider mb-2">Left Hand ✋</div>
+   425→   425→                <ul className="text-xs text-muted-foreground space-y-1">
+   426→   426→                  <li>↕ <span className="text-foreground">Height</span> → Dynamics (pp–ff)</li>
+   427→   427→                  <li>↔ <span className="text-foreground">X position</span> → Progression</li>
+   428→   428→                  <li>✊ <span className="text-foreground">Fist</span> → Strings only</li>
+   429→   429→                  <li>🤏 <span className="text-foreground">Pinch</span> → Lock chord</li>
+   430→   430→                </ul>
+   431→   431→              </div>
+   432→   432→            </div>
+   433→   433→          </div>
+   434→   434→
+   435→   435→          {/* ---- control panel ---- */}
+   436→   436→          <div className="flex flex-col gap-4">
+   437→   437→            {/* tempo + dynamic */}
+   438→   438→            <div className="rounded-2xl glass-strong p-5">
+   439→   439→              <div className="flex items-center justify-between mb-3">
+   440→   440→                <span className="text-xs text-muted-foreground uppercase tracking-wider flex items-center gap-1.5"><Activity className="h-3.5 w-3.5" /> Tempo</span>
+   441→   441→                <span className="text-2xl font-bold text-primary tabular-nums">{tempo}<span className="text-sm text-muted-foreground ml-1">BPM</span></span>
+   442→   442→              </div>
+   443→   443→              <div className="h-2 rounded-full bg-black/40 overflow-hidden mb-4">
+   444→   444→                <div className="h-full rounded-full bg-gradient-to-r from-primary to-chart-2 transition-all duration-300" style={{ width: `${((tempo - 50) / 130) * 100}%` }} />
+   445→   445→              </div>
+   446→   446→
+   447→   447→              <div className="flex items-center justify-between mb-2">
+   448→   448→                <span className="text-xs text-muted-foreground uppercase tracking-wider">Dynamics</span>
+   449→   449→                <span className="text-sm font-bold text-chart-4">{DYN_LABELS[dynamicLevel]}</span>
+   450→   450→              </div>
+   451→   451→              <div className="flex items-end gap-1 h-10">
+   452→   452→                {DYN_LABELS.map((d, i) => (
+   453→   453→                  <div key={d} className="flex-1 flex flex-col items-center gap-1">
+   454→   454→                    <div className={cn("w-full rounded-sm transition-all", i <= dynamicLevel ? "bg-chart-4" : "bg-white/5")} style={{ height: `${20 + i * 12}%` }} />
+   455→   455→                    <span className={cn("text-[9px]", i === dynamicLevel ? "text-chart-4 font-bold" : "text-muted-foreground")}>{d}</span>
+   456→   456→                  </div>
+   457→   457→                ))}
+   458→   458→              </div>
+   459→   459→            </div>
+   460→   460→
+   461→   461→            {/* scale + progression pickers */}
+   462→   462→            <div className="rounded-2xl glass-strong p-5">
+   463→   463→              <div className="text-xs text-muted-foreground uppercase tracking-wider mb-3">Harmony</div>
+   464→   464→              <div className="mb-3">
+   465→   465→                <div className="text-[10px] text-muted-foreground mb-1.5">Scale</div>
+   466→   466→                <div className="flex flex-wrap gap-1.5">
+   467→   467→                  {SCALES.map((s, i) => (
+   468→   468→                    <button key={s.name} onClick={() => onScale(i)} className={cn("px-2.5 py-1 rounded-md text-xs font-medium transition-colors", scaleIdx === i ? "bg-primary text-primary-foreground" : "bg-white/5 text-muted-foreground hover:text-foreground")}>{s.name}</button>
+   469→   469→                  ))}
+   470→   470→                </div>
+   471→   471→              </div>
+   472→   472→              <div>
+   473→   473→                <div className="text-[10px] text-muted-foreground mb-1.5">Progression</div>
+   474→   474→                <div className="flex flex-wrap gap-1.5">
+   475→   475→                  {PROGRESSIONS.map((p, i) => (
+   476→   476→                    <button key={p.name} onClick={() => onProg(i)} className={cn("px-2.5 py-1 rounded-md text-xs font-medium transition-colors", progIdx === i ? "bg-chart-3 text-primary-foreground" : "bg-white/5 text-muted-foreground hover:text-foreground")}>{p.name}</button>
+   477→   477→                  ))}
+   478→   478→                </div>
+   479→   479→              </div>
+   480→   480→            </div>
+   481→   481→
+   482→   482→            {/* mixer toggle */}
+   483→   483→            <button onClick={() => setShowMix(!showMix)} className="flex items-center justify-between rounded-2xl glass-strong p-4 hover:bg-white/5 transition-colors">
+   484→   484→              <span className="text-sm font-medium flex items-center gap-2"><Sliders className="h-4 w-4 text-primary" /> Mixer &amp; FX</span>
+   485→   485→              <ChevronRight className={cn("h-4 w-4 text-muted-foreground transition-transform", showMix && "rotate-90")} />
+   486→   486→            </button>
+   487→   487→            <AnimatePresence>
+   488→   488→              {showMix && (
+   489→   489→                <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+   490→   490→                  <div className="rounded-2xl glass-strong p-5 space-y-4">
+   491→   491→                    {LAYERS.map((l) => (
+   492→   492→                      <div key={l.id}>
+   493→   493→                        <div className="flex items-center justify-between mb-1">
+   494→   494→                          <span className={cn("text-xs font-medium", l.color)}>{l.label}</span>
+   495→   495→                          <span className="text-xs text-muted-foreground tabular-nums">{Math.round(layerVols[l.id] * 100)}</span>
+   496→   496→                        </div>
+   497→   497→                        <input
+   498→   498→                          type="range" min={0} max={1} step={0.01} value={layerVols[l.id]}
+   499→   499→                          onChange={(e) => onLayerVol(l.id, parseFloat(e.target.value))}
+   500→   500→                          className="w-full accent-primary h-1.5"
+   501→   501→                        />
+   502→   502→                      </div>
+   503→   503→                    ))}
+   504→   504→                    <div className="pt-2 border-t border-border/40 space-y-3">
+   505→   505→                      <div>
+   506→   506→                        <div className="flex items-center justify-between mb-1">
+   507→   507→                          <span className="text-xs font-medium text-chart-4">Reverb</span>
+   508→   508→                          <span className="text-xs text-muted-foreground tabular-nums">{Math.round(reverbAmt * 100)}</span>
+   509→   509→                        </div>
+   510→   510→                        <input type="range" min={0} max={1} step={0.01} value={reverbAmt} onChange={(e) => onReverb(parseFloat(e.target.value))} className="w-full accent-chart-4 h-1.5" />
+   511→   511→                      </div>
+   512→   512→                      <div>
+   513→   513→                        <div className="flex items-center justify-between mb-1">
+   514→   514→                          <span className="text-xs font-medium text-chart-2">Swing</span>
+   515→   515→                          <span className="text-xs text-muted-foreground tabular-nums">{Math.round(swingAmt * 100)}</span>
+   516→   516→                        </div>
+   517→   517→                        <input type="range" min={0} max={0.6} step={0.01} value={swingAmt} onChange={(e) => onSwing(parseFloat(e.target.value))} className="w-full accent-chart-2 h-1.5" />
+   518→   518→                      </div>
+   519→   519→                      <div>
+   520→   520→                        <div className="flex items-center justify-between mb-1">
+   521→   521→                          <span className="text-xs font-medium text-chart-3">Octave</span>
+   522→   522→                          <span className="text-xs text-muted-foreground tabular-nums">{octave > 0 ? `+${octave}` : octave}</span>
+   523→   523→                        </div>
+   524→   524→                        <input type="range" min={-2} max={2} step={1} value={octave} onChange={(e) => onOctave(parseInt(e.target.value))} className="w-full accent-chart-3 h-1.5" />
+   525→   525→                      </div>
+   526→   526→                    </div>
+   527→   527→                  </div>
+   528→   528→                </motion.div>
+   529→   529→              )}
+   530→   530→            </AnimatePresence>
+   531→   531→
+   532→   532→            {/* layer status */}
+   533→   533→            <div className="rounded-2xl glass p-4">
+   534→   534→              <div className="text-xs text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-1.5"><Volume2 className="h-3.5 w-3.5" /> Active layers</div>
+   535→   535→              <div className="grid grid-cols-5 gap-1.5">
+   536→   536→                {LAYERS.map((l) => {
+   537→   537→                  const on = activeLayers.includes(l.id);
+   538→   538→                  return (
+   539→   539→                    <div key={l.id} className={cn("rounded-lg p-2 text-center border transition-all", on ? "border-primary/40 bg-primary/5" : "border-white/10 opacity-40")}>
+   540→   540→                      <div className={cn("text-[10px] font-medium", l.color)}>{l.label}</div>
+   541→   541→                      <div className={cn("h-1 w-1 rounded-full mx-auto mt-1", on ? "bg-primary animate-pulse" : "bg-muted-foreground")} />
+   542→   542→                    </div>
+   543→   543→                  );
+   544→   544→                })}
+   545→   545→              </div>
+   546→   546→            </div>
+   547→   547→          </div>
+   548→   548→        </div>
+   549→   549→
+   550→   550→        {/* position readouts */}
+   551→   551→        <div className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+   552→   552→          <PosCard label="R · Y → Tempo" value={`${tempo}`} unit="BPM" color="text-primary" pct={rightY} />
+   553→   553→          <PosCard label="R · X → Melody" value={`${melodyDegree}`} unit="deg" color="text-chart-4" pct={rightX} />
+   554→   554→          <PosCard label="L · Y → Dynamic" value={DYN_LABELS[dynamicLevel]} unit="" color="text-chart-3" pct={leftY} />
+   555→   555→          <PosCard label="L · X → Progression" value={PROGRESSIONS[progIdx].name} unit="" color="text-chart-2" pct={leftX} />
+   556→   556→        </div>
+   557→   557→
+   558→   558→        <p className="mt-6 text-center text-xs text-muted-foreground">
+   559→   559→          Audio is synthesized live with Tone.js — no pre-recorded tracks. Camera + audio run entirely on your device. Use both hands for full control.
+   560→   560→        </p>
+   561→   561→      </div>
+   562→   562→    </div>
+   563→   563→  );
+   564→   564→}
+   565→   565→
+   566→   566→function PosCard({ label, value, unit, color, pct }: { label: string; value: string; unit: string; color: string; pct: number }) {
+   567→   567→  return (
+   568→   568→    <div className="rounded-xl glass p-3">
+   569→   569→      <div className="text-[10px] text-muted-foreground mb-1">{label}</div>
+   570→   570→      <div className={cn("text-lg font-bold tabular-nums", color)}>{value}<span className="text-xs text-muted-foreground ml-1">{unit}</span></div>
+   571→   571→      <div className="mt-1.5 h-1 rounded-full bg-black/40 overflow-hidden">
+   572→   572→        <div className={cn("h-full rounded-full", color.replace("text-", "bg-"))} style={{ width: `${pct * 100}%` }} />
+   573→   573→      </div>
+   574→   574→    </div>
+   575→   575→  );
+   576→   576→}
+   577→   577→

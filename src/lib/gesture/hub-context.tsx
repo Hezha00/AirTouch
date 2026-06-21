@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
 
-export type ViewName = "home" | "cursor" | "canvas" | "whiteboard" | "orchestra" | "piano" | "drumkit" | "presenter" | "sign" | "lab";
+export type ViewName = "home" | "cursor" | "canvas" | "whiteboard" | "orchestra" | "piano" | "drumkit" | "sign" | "lab";
 
 type HubCtx = {
   view: ViewName;

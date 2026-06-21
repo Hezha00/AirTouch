@@ -1,6 +1,7 @@
 "use client";
 
 import { HubProvider, useHub } from "@/lib/gesture/hub-context";
+import { I18nProvider, useI18n } from "@/lib/gesture/i18n-context";
 import { HubNav } from "@/components/hub-nav";
 import { SiteFooter } from "@/components/site-footer";
 import { Hero } from "@/components/sections/hero";
@@ -16,7 +17,6 @@ import { AirCanvasView } from "@/components/views/air-canvas-view";
 import { WhiteboardView } from "@/components/views/whiteboard-view";
 import { PianoView } from "@/components/views/piano-view";
 import { DrumkitView } from "@/components/views/drumkit-view";
-import { PresenterView } from "@/components/views/presenter-view";
 import { SignTrainerView } from "@/components/views/sign-trainer-view";
 import { HandLabView } from "@/components/views/hand-lab-view";
 
@@ -39,8 +39,9 @@ function HomeView() {
 
 function AppShell() {
   const { view } = useHub();
+  const { dir } = useI18n();
   return (
-    <div className="relative min-h-screen flex flex-col">
+    <div className="relative min-h-screen flex flex-col" dir={dir}>
       <HubNav />
       <main className="flex-1">
         {view === "home" && <HomeView />}
@@ -50,7 +51,6 @@ function AppShell() {
         {view === "whiteboard" && <WhiteboardView />}
         {view === "piano" && <PianoView />}
         {view === "drumkit" && <DrumkitView />}
-        {view === "presenter" && <PresenterView />}
         {view === "sign" && <SignTrainerView />}
         {view === "lab" && <HandLabView />}
       </main>
@@ -61,8 +61,10 @@ function AppShell() {
 
 export default function Home() {
   return (
-    <HubProvider>
-      <AppShell />
-    </HubProvider>
+    <I18nProvider>
+      <HubProvider>
+        <AppShell />
+      </HubProvider>
+    </I18nProvider>
   );
 }

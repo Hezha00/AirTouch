@@ -4,26 +4,27 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Hand, Home, MousePointer2, Music, Palette, Fingerprint,
-  Piano as PianoIcon, Presentation, Languages, FileText, Drum, ChevronLeft,
+  Piano as PianoIcon, Languages, FileText, Drum, ChevronLeft, Globe,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useHub, type ViewName } from "@/lib/gesture/hub-context";
+import { useI18n } from "@/lib/gesture/i18n-context";
 
-const TOOLS: { id: ViewName; label: string; icon: typeof Home }[] = [
-  { id: "home", label: "Hub", icon: Home },
-  { id: "cursor", label: "Cursor", icon: MousePointer2 },
-  { id: "canvas", label: "Canvas", icon: Palette },
-  { id: "whiteboard", label: "Whiteboard", icon: FileText },
-  { id: "orchestra", label: "Orchestra", icon: Music },
-  { id: "piano", label: "Piano", icon: PianoIcon },
-  { id: "drumkit", label: "Drumkit", icon: Drum },
-  { id: "presenter", label: "Presenter", icon: Presentation },
-  { id: "sign", label: "Sign", icon: Languages },
-  { id: "lab", label: "Hand Lab", icon: Fingerprint },
+const TOOLS: { id: ViewName; labelKey: string; icon: typeof Home }[] = [
+  { id: "home", labelKey: "nav.hub", icon: Home },
+  { id: "cursor", labelKey: "nav.cursor", icon: MousePointer2 },
+  { id: "canvas", labelKey: "nav.canvas", icon: Palette },
+  { id: "whiteboard", labelKey: "nav.whiteboard", icon: FileText },
+  { id: "orchestra", labelKey: "nav.orchestra", icon: Music },
+  { id: "piano", labelKey: "nav.piano", icon: PianoIcon },
+  { id: "drumkit", labelKey: "nav.drumkit", icon: Drum },
+  { id: "sign", labelKey: "nav.sign", icon: Languages },
+  { id: "lab", labelKey: "nav.lab", icon: Fingerprint },
 ];
 
 export function HubNav() {
   const { view, go } = useHub();
+  const { t, toggle, lang } = useI18n();
   const [scrolled, setScrolled] = useState(false);
 
   useEffect(() => {
@@ -57,17 +58,17 @@ export function HubNav() {
 
           {/* tool switcher — horizontally scrollable on mobile */}
           <div className="flex items-center gap-0.5 sm:gap-1 p-1 rounded-xl glass overflow-x-auto scrollbar-thin max-w-full flex-1 sm:flex-none justify-end">
-            {TOOLS.map((t) => {
-              const active = view === t.id;
+            {TOOLS.map((tool) => {
+              const active = view === tool.id;
               return (
                 <button
-                  key={t.id}
-                  onClick={() => go(t.id)}
+                  key={tool.id}
+                  onClick={() => go(tool.id)}
                   className={cn(
                     "relative flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all flex-shrink-0",
                     active ? "text-primary-foreground" : "text-muted-foreground hover:text-foreground"
                   )}
-                  aria-label={t.label}
+                  aria-label={t(tool.labelKey)}
                 >
                   {active && (
                     <motion.div
@@ -76,22 +77,22 @@ export function HubNav() {
                       transition={{ type: "spring", stiffness: 400, damping: 32 }}
                     />
                   )}
-                  <t.icon className="relative h-4 w-4" />
-                  <span className="relative hidden sm:inline">{t.label}</span>
+                  <tool.icon className="relative h-4 w-4" />
+                  <span className="relative hidden sm:inline">{t(tool.labelKey)}</span>
                 </button>
               );
             })}
           </div>
 
-          {view !== "home" && (
-            <button
-              onClick={() => go("home")}
-              className="hidden lg:flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors flex-shrink-0"
-            >
-              <ChevronLeft className="h-4 w-4" />
-              Back to hub
-            </button>
-          )}
+          {/* language switch */}
+          <button
+            onClick={toggle}
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg glass text-xs sm:text-sm font-medium hover:bg-white/10 transition-all flex-shrink-0"
+            aria-label="Toggle language"
+          >
+            <Globe className="h-3.5 w-3.5 text-primary" />
+            <span className={cn(lang === "fa" ? "font-mono" : "")}>{lang === "en" ? "فارسی" : "EN"}</span>
+          </button>
         </div>
       </nav>
     </motion.header>
