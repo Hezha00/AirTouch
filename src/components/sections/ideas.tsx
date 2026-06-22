@@ -101,23 +101,6 @@ export function Ideas() {
             </motion.div>
           ))}
         </div>
-
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: "-50px" }}
-          className="mt-12 rounded-2xl glass-strong p-8 text-center"
-        >
-          <h3 className="text-2xl font-bold mb-2">
-            The engine is yours to extend
-          </h3>
-          <p className="text-muted-foreground max-w-xl mx-auto">
-            Every gesture is a pure function of 21 landmarks. Add your own by
-            editing <code className="font-mono text-sm px-1.5 py-0.5 rounded bg-white/5 text-primary">hand_gestures.py</code> —
-            the state machine, hysteresis, and depth-normalisation utilities are
-            all reusable.
-          </p>
-        </motion.div>
       </div>
     </section>
   );

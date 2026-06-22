@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /* ------------------------------------------------------------------ */
-/*  Types                                                              */
+/* Types                                                             */
 /* ------------------------------------------------------------------ */
 export type Landmark = { x: number; y: number; z: number };
 
@@ -13,7 +13,7 @@ export type HandState = {
   x: number;          // 0..1, mirrored so it feels natural
   y: number;          // 0..1
   velocity: number;   // 0..1 normalised speed (kept for legacy use, but
-                      // downstream code should prefer position/gesture)
+  // downstream code should prefer position/gesture)
   gesture: GestureType;
   present: boolean;
   handedness: "Left" | "Right" | "Unknown";
@@ -31,7 +31,7 @@ const DEFAULT_HAND: HandState = {
 };
 
 /* ------------------------------------------------------------------ */
-/*  Helpers                                                            */
+/* Helpers                                                           */
 /* ------------------------------------------------------------------ */
 function dist(a: Landmark, b: Landmark) {
   return Math.hypot(a.x - b.x, a.y - b.y);
@@ -64,7 +64,7 @@ function classifyGesture(lm: Landmark[]): GestureType {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Hook                                                                */
+/* Hook                                                              */
 /* ------------------------------------------------------------------ */
 export function useHandTracking(opts?: {
   smoothing?: number;        // EMA alpha for x,y (default 0.4)
@@ -153,11 +153,14 @@ export function useHandTracking(opts?: {
 
         const now = performance.now();
         let instVel = 0;
-        if (prevPosRefs.current[i]) {
-          const dt = (now - prevPosRefs.current[i].t) / 1000;
+
+        // Fix: Capture reference inside a stable constant so TypeScript narrows the null check
+        const prevPos = prevPosRefs.current[i];
+        if (prevPos) {
+          const dt = (now - prevPos.t) / 1000;
           if (dt > 0) {
-            const dx = mx - prevPosRefs.current[i].x;
-            const dy = my - prevPosRefs.current[i].y;
+            const dx = mx - prevPos.x;
+            const dy = my - prevPos.y;
             instVel = Math.min(1, Math.hypot(dx, dy) / dt / 1.5);
           }
         }
