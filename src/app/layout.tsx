@@ -50,6 +50,8 @@ export default function RootLayout({
       >
         {children}
         <Toaster />
+        <SpeedInsights />
+        <Analytics />
       </body>
     </html>
   );
