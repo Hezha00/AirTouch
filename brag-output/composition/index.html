@@ -1,0 +1,546 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <title>AirTouch - Control your PC with bare hands</title>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <script src="assets/music/vol10-audio-data.js"></script>
+    <style>
+      @font-face {
+        font-family: "Geist";
+        src: url("assets/fonts/Geist-Variable.woff2") format("woff2");
+        font-weight: 100 900;
+        font-style: normal;
+      }
+      @font-face {
+        font-family: "Geist Mono";
+        src: url("assets/fonts/GeistMono-Variable.woff2") format("woff2");
+        font-weight: 100 900;
+        font-style: normal;
+      }
+
+      :root {
+        --bg: oklch(0.08 0.005 240);
+        --fg: oklch(0.96 0.005 240);
+        --emerald: oklch(0.74 0.19 155);
+        --cyan: oklch(0.72 0.15 195);
+        --amber: oklch(0.8 0.18 85);
+        --fuchsia: oklch(0.66 0.22 305);
+        --rose: oklch(0.7 0.2 15);
+        --muted: oklch(0.75 0.01 240);
+        --glass: oklch(0.14 0.008 240 / 0.72);
+      }
+
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+
+      html, body {
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: var(--bg);
+        font-family: "Geist", system-ui, sans-serif;
+        color: var(--fg);
+      }
+
+      #root {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background:
+          radial-gradient(ellipse 80% 50% at 50% -10%, oklch(0.72 0.19 155 / 0.13), transparent 60%),
+          radial-gradient(ellipse 60% 50% at 90% 10%, oklch(0.7 0.15 195 / 0.09), transparent 60%),
+          var(--bg);
+      }
+
+      #bg-grid {
+        position: absolute;
+        inset: 0;
+        background-image:
+          linear-gradient(oklch(1 0 0 / 0.04) 1px, transparent 1px),
+          linear-gradient(90deg, oklch(1 0 0 / 0.04) 1px, transparent 1px);
+        background-size: 48px 48px;
+        -webkit-mask-image: radial-gradient(ellipse 78% 70% at 50% 42%, black 32%, transparent 76%);
+        mask-image: radial-gradient(ellipse 78% 70% at 50% 42%, black 32%, transparent 76%);
+        opacity: 0.5;
+      }
+      #gridfx {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        opacity: 0.25;
+        background:
+          radial-gradient(ellipse 55% 42% at 50% 45%, oklch(0.72 0.19 155 / 0.12), transparent 70%),
+          radial-gradient(ellipse 40% 30% at 72% 18%, oklch(0.72 0.15 195 / 0.09), transparent 70%);
+      }
+
+      .clip {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .hide { opacity: 0; }
+
+      /* shared type */
+      .big {
+        font-family: "Geist", system-ui, sans-serif;
+        font-weight: 900;
+        text-transform: uppercase;
+        letter-spacing: -0.03em;
+        line-height: 0.95;
+        color: var(--fg);
+      }
+      .grad {
+        background: linear-gradient(135deg, var(--emerald) 0%, var(--cyan) 55%, var(--amber) 100%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+      }
+      .mono {
+        font-family: "Geist Mono", ui-monospace, monospace;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+      }
+      .glass {
+        background: var(--glass);
+        border: 1px solid oklch(1 0 0 / 0.1);
+        border-radius: 22px;
+        box-shadow: 0 0 60px oklch(0.72 0.19 155 / 0.08);
+      }
+      .chip {
+        font-family: "Geist Mono", ui-monospace, monospace;
+        font-size: 30px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--muted);
+        padding: 12px 26px;
+        border-radius: 999px;
+        border: 1px solid oklch(1 0 0 / 0.12);
+        background: oklch(0.1 0.006 240 / 0.6);
+      }
+
+      /* hand skeleton skin */
+      .skel-line { stroke: var(--sk, var(--emerald)); fill: none; stroke-width: 9; stroke-linecap: round; stroke-linejoin: round; }
+      .skel-joint { fill: var(--amber); }
+      .skel-tip { fill: var(--cyan); }
+      .skel-root { filter: drop-shadow(0 0 18px var(--sk, var(--emerald))); }
+      svg.hand { display: block; }
+
+      /* scenes */
+      .s1 .stage { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+      #skel1 { position: absolute; top: 130px; left: 50%; margin-left: -320px; width: 640px; height: 700px; opacity: 0.78; }
+      .hookline { position: relative; text-align: center; margin-top: 100px; z-index: 2; }
+      .hookline h1 { font-size: 150px; }
+      .hookline .hook-b { font-size: 184px; }
+
+      .s2 .col { display: flex; flex-direction: column; align-items: center; gap: 54px; width: 1500px; }
+      #panel { position: relative; width: 980px; height: 264px; padding: 26px 40px; display: flex; align-items: center; gap: 26px; }
+      .toolcard { position: relative; flex: 1; height: 168px; border-radius: 18px; background: oklch(0.09 0.006 240 / 0.85); border: 1px solid oklch(1 0 0 / 0.09); display: flex; flex-direction: column; justify-content: center; padding: 0 26px; gap: 10px; }
+      .toolcard .tc-ico { font-size: 40px; }
+      .toolcard .tc-name { font-size: 34px; font-weight: 700; }
+      .toolcard .tc-tag { font-family: "Geist Mono", ui-monospace, monospace; font-size: 20px; color: var(--muted); letter-spacing: 0.06em; }
+      #cursor { position: absolute; top: 46px; left: -60px; z-index: 3; }
+      #cursor .eye { width: 64px; height: 64px; border-radius: 50%; border: 4px solid var(--emerald); background: oklch(0.3 0.12 155 / 0.35); box-shadow: 0 0 30px var(--emerald); }
+      #cursor .dot { position: absolute; inset: 20px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 20px var(--cyan); }
+      #clickflash { position: absolute; z-index: 4; width: 190px; height: 190px; border-radius: 50%; border: 6px solid var(--rose); opacity: 0; }
+      .brand { text-align: center; }
+      .brand h2 { font-size: 168px; line-height: 0.9; }
+      .chiprow { display: flex; gap: 20px; margin-top: 30px; }
+      .gestchip { font-family: "Geist Mono", ui-monospace, monospace; font-size: 26px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding: 10px 22px; border: 1px solid oklch(1 0 0 / 0.12); border-radius: 999px; }
+
+      .s3 .col { display: flex; align-items: center; gap: 90px; }
+      #skel3 { width: 380px; height: 420px; }
+      .pads { display: flex; gap: 34px; }
+      .pad { position: relative; width: 200px; height: 200px; border-radius: 26px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; background: oklch(0.12 0.006 240 / 0.85); border: 1px solid oklch(1 0 0 / 0.09); }
+      .pad .p-ico { font-size: 62px; line-height: 1; }
+      .pad .p-name { font-family: "Geist Mono", ui-monospace, monospace; font-size: 20px; letter-spacing: 0.1em; color: var(--muted); text-transform: uppercase; }
+      .pad .p-flash { position: absolute; inset: 0; border-radius: 26px; opacity: 0; }
+      .padlabel { position: absolute; top: -86px; left: 50%; margin-left: -110px; width: 220px; text-align: center; }
+      .padlabel .pl { font-size: 66px; line-height: 1; }
+
+      .s4 .col { display: flex; align-items: center; gap: 80px; }
+      #skel4 { width: 360px; height: 400px; }
+      .keys { position: relative; display: flex; gap: 14px; padding: 26px 30px; }
+      .key { position: relative; width: 116px; height: 240px; background: linear-gradient(180deg, oklch(0.99 0.005 240) 0%, oklch(0.86 0.02 230) 100%); border-radius: 16px 16px 8px 8px; box-shadow: 0 8px 24px oklch(0 0 0 / 0.5); }
+      .key .k-name { position: absolute; bottom: 14px; left: 0; right: 0; text-align: center; font-family: "Geist Mono", ui-monospace, monospace; font-size: 26px; color: oklch(0.3 0.02 240); }
+      .key .k-glow { position: absolute; inset: 0; border-radius: 16px; opacity: 0; box-shadow: inset 0 0 0 6px var(--orange), 0 0 40px var(--orange); }
+      .note { position: absolute; bottom: 252px; width: 90px; margin-left: -45px; text-align: center; font-size: 44px; font-weight: 800; opacity: 0; }
+      .note .pitch { font-family: "Geist Mono", ui-monospace, monospace; font-size: 22px; color: var(--muted); display: block; }
+
+      .s5 .col { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+      #skelL { position: absolute; left: 110px; top: 240px; width: 520px; height: 560px; --sk: var(--fuchsia); }
+      #skelR { position: absolute; right: 110px; top: 240px; width: 520px; height: 560px; --sk: var(--fuchsia); transform: scaleX(-1); }
+      #beam { position: absolute; left: 560px; right: 560px; top: 540px; height: 26px; border-radius: 999px; background: linear-gradient(90deg, var(--fuchsia), oklch(0.8 0.2 60), var(--fuchsia)); box-shadow: 0 0 60px var(--fuchsia); opacity: 0; }
+      .orch-line { position: absolute; left: 0; right: 0; text-align: center; }
+      .orch-line h3 { font-size: 104px; }
+      .orch-line h4 { font-size: 76px; }
+      #orchTop { top: 150px; }
+      #orchBot { top: 700px; }
+
+      .s6 .split { display: flex; width: 100%; height: 100%; }
+      .half { position: relative; flex: 1; display: flex; align-items: center; justify-content: center; }
+      .half-left { border-right: 1px solid oklch(1 0 0 / 0.08); }
+      .swish { position: absolute; width: 460px; height: 460px; }
+      #aslBig { font-size: 300px; font-weight: 900; -webkit-text-fill-color: transparent; background: linear-gradient(135deg, var(--amber), var(--rose)); background-clip: text; }
+      .half-label { position: absolute; bottom: 120px; left: 0; right: 0; text-align: center; }
+      .half-label h3 { font-size: 92px; }
+
+      .s7 .stats { display: flex; gap: 46px; }
+      .stat { width: 380px; min-height: 340px; border-radius: 30px; background: var(--glass); border: 1px solid oklch(1 0 0 / 0.1); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; text-align: center; }
+      .stat .v { font-family: "Geist", system-ui, sans-serif; font-size: 150px; font-weight: 900; line-height: 0.9; }
+      .stat .l { font-family: "Geist Mono", ui-monospace, monospace; font-size: 28px; letter-spacing: 0.16em; color: var(--muted); text-transform: uppercase; }
+      .stat .num { color: var(--fg); }
+
+      .s8 { text-align: center; }
+      #logoHalo { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+      #logoHalo .ring { width: 780px; height: 780px; border-radius: 50%; background: radial-gradient(circle, oklch(0.72 0.19 155 / 0.28), oklch(0.72 0.15 195 / 0.12) 55%, transparent 72%); }
+      .s8 h2 { font-size: 240px; }
+      .s8 .tag { font-size: 72px; margin-top: 60px; }
+      .s8 .urlchip { margin: 64px auto 0; }
+      #blackout { position: absolute; inset: 0; background: #000; opacity: 0; }
+      .fadeblack { position: absolute; inset: 0; background: var(--bg); opacity: 0; z-index: 5; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="22.3" data-width="1920" data-height="1080" data-fps="30">
+    <div id="bg-grid"></div>
+    <div id="gridfx"></div>
+
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+      <symbol id="hand-skel" viewBox="0 0 300 360" xmlns="http://www.w3.org/2000/svg">
+        <g class="skel-root" fill="none">
+          <path class="skel-line" d="M140 330 L78 278 L52 240 L38 205 L32 172" />
+          <path class="skel-line" d="M140 330 L104 236 L100 180 L104 138 L108 100" />
+          <path class="skel-line" d="M140 330 L136 232 L138 175 L144 132 L146 96" />
+          <path class="skel-line" d="M140 330 L170 234 L176 178 L182 138 L186 102" />
+          <path class="skel-line" d="M140 330 L204 246 L212 200 L218 162 L222 128" />
+          <path class="skel-line" d="M104 236 L136 232 L170 234 L204 246" />
+          <path class="skel-line" d="M52 240 L104 236" />
+        </g>
+        <g class="skel-joint">
+          <circle cx="140" cy="330" r="9" />
+          <circle cx="78" cy="278" r="8" /><circle cx="52" cy="240" r="8" /><circle cx="38" cy="205" r="8" /><circle cx="32" cy="172" r="8" />
+          <circle cx="104" cy="236" r="8" /><circle cx="100" cy="180" r="8" /><circle cx="104" cy="138" r="8" />
+          <circle cx="136" cy="232" r="8" /><circle cx="138" cy="175" r="8" /><circle cx="144" cy="132" r="8" />
+          <circle cx="170" cy="234" r="8" /><circle cx="176" cy="178" r="8" /><circle cx="182" cy="138" r="8" />
+          <circle cx="204" cy="246" r="8" /><circle cx="212" cy="200" r="8" /><circle cx="218" cy="162" r="8" /><circle cx="222" cy="128" r="8" />
+        </g>
+        <g class="skel-tip">
+          <circle cx="32" cy="172" r="9" /><circle cx="108" cy="100" r="12" /><circle cx="146" cy="96" r="9" /><circle cx="186" cy="102" r="9" /><circle cx="222" cy="128" r="9" />
+        </g>
+      </symbol>
+    </svg>
+
+    <!-- Scene 1: HOOK 0.00-2.90 -->
+    <section id="scene-1" class="clip s1" data-start="0" data-duration="2.9" data-track-index="0">
+      <div class="stage">
+        <svg id="skel1" class="hand hide" viewBox="0 0 300 360" xmlns="http://www.w3.org/2000/svg">
+          <use href="#hand-skel"></use>
+        </svg>
+        <div class="hookline">
+          <h1 class="big hide" id="hookA">TOUCHING MICE</h1>
+          <h1 class="big grad hide" id="hookB">IS OVER.</h1>
+        </div>
+      </div>
+    </section>
+
+    <!-- Scene 2: REVEAL 2.90-5.90 -->
+    <section id="scene-2" class="clip s2" data-start="2.9" data-duration="3" data-track-index="1">
+      <div class="col">
+        <div id="panel" class="glass hide">
+          <div class="toolcard">
+            <div class="tc-ico">🖱️</div><div class="tc-name">Cursor Control</div><div class="tc-tag">PINCH = CLICK</div>
+          </div>
+          <div class="toolcard">
+            <div class="tc-ico">🎨</div><div class="tc-name">Air Canvas</div><div class="tc-tag">PAINT IN AIR</div>
+          </div>
+          <div class="toolcard">
+            <div class="tc-ico">🪗</div><div class="tc-name">Orchestra</div><div class="tc-tag">CONDUCT MUSIC</div>
+          </div>
+          <div id="cursor"><div class="dot"></div><div class="eye"></div></div>
+          <div id="clickflash" style="left:87px;top:25px"></div>
+        </div>
+        <div class="brand">
+          <h2 class="big grad hide" id="brandWord">AIRTOUCH</h2>
+          <div class="chiprow hide" id="brandChips">
+            <span class="gestchip">POINT → MOVE</span>
+            <span class="gestchip">PINCH → CLICK</span>
+            <span class="gestchip">NO INSTALL</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Scene 3: DRUMKIT 5.90-8.50 -->
+    <section id="scene-3" class="clip s3" data-start="5.9" data-duration="2.6" data-track-index="2">
+      <div class="col">
+        <svg id="skel3" class="hand hide" viewBox="0 0 300 360" xmlns="http://www.w3.org/2000/svg">
+          <use href="#hand-skel"></use>
+        </svg>
+        <div class="pads">
+          <div class="pad" id="padKick">
+            <div class="p-flash" style="background:radial-gradient(circle, var(--rose), transparent 70%)"></div>
+            <div class="p-ico">🥁</div><div class="p-name">Kick</div>
+            <div class="padlabel hide" id="kickLabel"><div class="pl grad">KICK</div></div>
+          </div>
+          <div class="pad" id="padSnare">
+            <div class="p-flash" style="background:radial-gradient(circle, var(--amber), transparent 70%)"></div>
+            <div class="p-ico">🪘</div><div class="p-name">Snare</div>
+            <div class="padlabel hide" id="snareLabel"><div class="pl grad">SNARE</div></div>
+          </div>
+          <div class="pad"><div class="p-ico">🛎️</div><div class="p-name">Hi-hat</div></div>
+          <div class="pad"><div class="p-ico">🎯</div><div class="p-name">Toms</div></div>
+          <div class="pad"><div class="p-ico">🎫</div><div class="p-name">Cymbal</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Scene 4: PIANO 8.50-11.10 -->
+    <section id="scene-4" class="clip s4" data-start="8.5" data-duration="2.6" data-track-index="3">
+      <div class="col">
+        <svg id="skel4" class="hand hide" viewBox="0 0 300 360" xmlns="http://www.w3.org/2000/svg">
+          <use href="#hand-skel"></use>
+        </svg>
+        <div id="pianoBox" class="glass hide">
+          <div class="keys">
+            <div class="key"><span class="k-name">C4</span><div class="k-glow" style="--orange:var(--amber)"></div></div>
+            <div class="key"><span class="k-name">D4</span><div class="k-glow" style="--orange:var(--amber)"></div></div>
+            <div class="key"><span class="k-name">E4</span><div class="k-glow" style="--orange:var(--amber)"></div></div>
+            <div class="key"><span class="k-name">F4</span><div class="k-glow" style="--orange:var(--amber)"></div></div>
+            <div class="key"><span class="k-name">G4</span><div class="k-glow" style="--orange:var(--amber)"></div></div>
+            <div class="key"><span class="k-name">A4</span><div class="k-glow" style="--orange:var(--amber)"></div></div>
+            <div class="key"><span class="k-name">B4</span><div class="k-glow" style="--orange:var(--amber)"></div></div>
+            <div class="key"><span class="k-name">C5</span><div class="k-glow" style="--orange:var(--amber)"></div></div>
+            <div class="key"><span class="k-name">D5</span><div class="k-glow" style="--orange:var(--amber)"></div></div>
+          </div>
+          <div class="note hide" id="note1" style="left:70px"><span>C</span><span class="pitch">KEY 1</span></div>
+          <div class="note hide" id="note2" style="left:318px"><span>E</span><span class="pitch">KEY 3</span></div>
+        </div>
+        <div class="brand">
+          <h2 class="big hide" id="pianoName">GESTURE <span class="grad">PIANO</span></h2>
+        </div>
+      </div>
+    </section>
+
+    <!-- Scene 5: ORCHESTRA 11.10-14.10 -->
+    <section id="scene-5" class="clip s5" data-start="11.1" data-duration="3" data-track-index="4">
+      <div class="col">
+        <svg id="skelL" class="hand hide" viewBox="0 0 300 360" xmlns="http://www.w3.org/2000/svg">
+          <use href="#hand-skel"></use>
+        </svg>
+        <svg id="skelR" class="hand hide" viewBox="0 0 300 360" xmlns="http://www.w3.org/2000/svg">
+          <use href="#hand-skel"></use>
+        </svg>
+        <div id="beam" class="hide"></div>
+        <div class="orch-line" id="orchTop">
+          <h3 class="big hide" id="orchA">GENERATIVE MUSIC.</h3>
+        </div>
+        <div class="orch-line" id="orchBot">
+          <h4 class="big grad hide" id="orchB">CONDUCTED BY YOU.</h4>
+        </div>
+      </div>
+    </section>
+
+    <!-- Scene 6: RAPID FIRE 14.10-16.50 -->
+    <section id="scene-6" class="clip s6" data-start="14.1" data-duration="2.4" data-track-index="5">
+      <div class="split">
+        <div class="half half-left">
+          <svg id="swish" class="swish hide" viewBox="0 0 300 300" xmlns="http://www.w3.org/2000/svg">
+            <path id="swishPath" class="skel-line" style="--sk:var(--cyan)" d="M20 250 C 90 220, 140 260, 200 140 S 260 60, 280 40" />
+            <circle cx="20" cy="250" r="10" fill="var(--cyan)"/>
+          </svg>
+          <div class="half-label"><h3 class="big hide" id="paintLabel">PAINT IN AIR.</h3></div>
+        </div>
+        <div class="half">
+          <span id="aslBig" class="hide">A</span>
+          <div class="half-label"><h3 class="big hide" id="aslLabel">LEARN ASL.</h3></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Scene 7: STATS 16.50-19.10 -->
+    <section id="scene-7" class="clip s7" data-start="16.5" data-duration="2.6" data-track-index="6">
+      <div class="stats">
+        <div class="stat hide" id="stat1"><div class="v num">8</div><div class="l">Tools</div></div>
+        <div class="stat hide" id="stat2"><div class="v grad">21</div><div class="l">Landmarks</div></div>
+        <div class="stat hide" id="stat3"><div class="v num">~10ms</div><div class="l">Inference</div></div>
+        <div class="stat hide" id="stat4"><div class="v grad">0</div><div class="l">Cloud</div></div>
+      </div>
+    </section>
+
+    <!-- Scene 8: OUTRO 19.10-22.30 -->
+    <section id="scene-8" class="clip s8" data-start="19.1" data-duration="3.2" data-track-index="7">
+      <div id="logoHalo"><div class="ring"></div></div>
+      <h2 class="big grad hide" id="logo">AIRTOUCH</h2>
+      <div class="tag big hide" id="tagline">CONTROL YOUR PC WITH BARE HANDS</div>
+      <div class="urlchip chip hide" id="urlchip">airtouch.app ↳</div>
+      <div id="blackout"></div>
+    </section>
+
+    <div class="fadeblack"></div>
+
+    <!-- ===================== AUDIO ===================== -->
+    <audio id="music" src="assets/music/happy-beats-business-moves-vol-10-by-ende-dot-app.mp3" data-start="0" data-duration="22.3" data-volume="0.34" data-track-index="10"></audio>
+
+    <audio id="sfx-skel" src="assets/sfx/impact/impactPunch_heavy_000.ogg" data-start="0.27" data-duration="1" data-volume="0.85" data-track-index="11"></audio>
+    <audio id="sfx-over" src="assets/sfx/impact/impactPunch_medium_000.ogg" data-start="1.9" data-duration="1" data-volume="0.72" data-track-index="12"></audio>
+    <audio id="sfx-panel" src="assets/sfx/casino/card-slide-1.ogg" data-start="2.95" data-duration="1" data-volume="0.5" data-track-index="13"></audio>
+    <audio id="sfx-click" src="assets/sfx/ui/mouseclick1.ogg" data-start="4.2" data-duration="1" data-volume="0.8" data-track-index="14"></audio>
+    <audio id="sfx-brand" src="assets/sfx/impact/impactSoft_medium_001.ogg" data-start="5.19" data-duration="1" data-volume="0.8" data-track-index="15"></audio>
+    <audio id="sfx-padsin" src="assets/sfx/casino/card-shove-1.ogg" data-start="5.95" data-duration="1" data-volume="0.5" data-track-index="16"></audio>
+    <audio id="sfx-kick" src="assets/sfx/impact/impactPunch_heavy_000.ogg" data-start="6.28" data-duration="1" data-volume="0.9" data-track-index="17"></audio>
+    <audio id="sfx-snare" src="assets/sfx/impact/impactPlate_light_001.ogg" data-start="7.35" data-duration="1" data-volume="0.8" data-track-index="18"></audio>
+    <audio id="sfx-piano" src="assets/sfx/casino/card-shove-2.ogg" data-start="8.55" data-duration="1" data-volume="0.5" data-track-index="19"></audio>
+    <audio id="sfx-note1" src="assets/sfx/impact/impactGlass_light_001.ogg" data-start="9.29" data-duration="1" data-volume="0.7" data-track-index="20"></audio>
+    <audio id="sfx-note2" src="assets/sfx/impact/impactGlass_light_002.ogg" data-start="9.83" data-duration="1" data-volume="0.7" data-track-index="21"></audio>
+    <audio id="sfx-pianoname" src="assets/sfx/interface/select_008.ogg" data-start="10.38" data-duration="1" data-volume="0.6" data-track-index="22"></audio>
+    <audio id="sfx-beam" src="assets/sfx/interface/bong_001.ogg" data-start="11.47" data-duration="1.6" data-volume="0.7" data-track-index="23"></audio>
+    <audio id="sfx-orchA" src="assets/sfx/impact/impactGlass_light_003.ogg" data-start="12.02" data-duration="1" data-volume="0.6" data-track-index="24"></audio>
+    <audio id="sfx-orchB" src="assets/sfx/interface/click_003.ogg" data-start="12.56" data-duration="1" data-volume="0.6" data-track-index="25"></audio>
+    <audio id="sfx-swish" src="assets/sfx/casino/card-slide-1.ogg" data-start="14.2" data-duration="1.2" data-volume="0.65" data-track-index="26"></audio>
+    <audio id="sfx-paintlbl" src="assets/sfx/interface/click_002.ogg" data-start="14.73" data-duration="1" data-volume="0.55" data-track-index="27"></audio>
+    <audio id="sfx-asl" src="assets/sfx/interface/click_003.ogg" data-start="15.6" data-duration="1" data-volume="0.55" data-track-index="28"></audio>
+    <audio id="sfx-stat1" src="assets/sfx/casino/card-shove-1.ogg" data-start="16.93" data-duration="1" data-volume="0.7" data-track-index="29"></audio>
+    <audio id="sfx-stat2" src="assets/sfx/casino/card-shove-2.ogg" data-start="17.47" data-duration="1" data-volume="0.7" data-track-index="30"></audio>
+    <audio id="sfx-stat3" src="assets/sfx/casino/card-shove-3.ogg" data-start="18.01" data-duration="1" data-volume="0.7" data-track-index="31"></audio>
+    <audio id="sfx-stat4" src="assets/sfx/casino/card-shove-4.ogg" data-start="18.55" data-duration="1" data-volume="0.7" data-track-index="32"></audio>
+    <audio id="sfx-logo" src="assets/sfx/impact/impactBell_heavy_000.ogg" data-start="19.64" data-duration="1.6" data-volume="0.85" data-track-index="33"></audio>
+    <audio id="sfx-url" src="assets/sfx/interface/click_002.ogg" data-start="20.74" data-duration="1" data-volume="0.6" data-track-index="34"></audio>
+    </div>
+    <script>
+      (function () {
+        var Q = function (s) { return document.querySelector(s); };
+        var tl = gsap.timeline({ paused: true, defaults: { overwrite: true } });
+
+        gsap.registerPlugin();
+
+        /* ---------- Scene 1: HOOK (0.00-2.90) ---------- */
+        // skeleton slam lands on beat 0.27
+        tl.fromTo("#skel1", { opacity: 0, x: 900, scale: 1.25 }, { opacity: 0.78, x: 0, scale: 1, duration: 0.22, ease: "power3.out" }, 0.05);
+        tl.fromTo("#hookA", { opacity: 0, scale: 1.25, y: 40 }, { opacity: 1, scale: 1, y: 0, duration: 0.3, ease: "power2.out" }, 0.82); // beat 0.82
+        tl.fromTo("#hookB", { opacity: 0, scale: 1.45, y: 50 }, { opacity: 1, scale: 1, y: 0, duration: 0.26, ease: "back.out(2)" }, 1.9); // beat-locked 1.90
+        tl.fromTo("#skel1", { scale: 1 }, { scale: 1.06, duration: 0.18, ease: "power2.out", immediateRender: false }, 1.9);
+
+        /* ---------- Scene 2: REVEAL (2.90-5.90) ---------- */
+        tl.fromTo("#panel", { opacity: 0, y: 60, scale: 0.96 }, { opacity: 1, y: 0, scale: 1, duration: 0.42, ease: "power2.out" }, 2.95); // + card-slide-1 2.95
+        // cursor swoops to the first tool card
+        tl.fromTo("#cursor", { x: -60, y: -30, scale: 0.8 }, { x: 210, y: 42, scale: 1, duration: 0.9, ease: "power2.inOut" }, 3.0);
+        // click press on card 1 + flash ring (mouseclick1 at 4.2)
+        tl.fromTo("#panel .toolcard:nth-child(1)", { scale: 1 }, { scale: 0.93, duration: 0.08 }, 4.19);
+        tl.to("#panel .toolcard:nth-child(1)", { scale: 1, duration: 0.16, ease: "power2.out" }, 4.28);
+        tl.fromTo("#clickflash", { opacity: 0, scale: 0.5 }, { opacity: 1, scale: 1, duration: 0.16, ease: "power3.out" }, 4.2);
+        tl.to("#clickflash", { opacity: 0, scale: 1.45, duration: 0.35, ease: "power2.out" }, 4.38);
+        // brand slam on beat 5.19
+        tl.fromTo("#brandWord", { opacity: 0, scale: 1.4 }, { opacity: 1, scale: 1, duration: 0.26, ease: "back.out(1.8)" }, 5.19);
+        tl.fromTo("#brandChips", { opacity: 0, y: 26 }, { opacity: 1, y: 0, duration: 0.3, ease: "power2.out" }, 5.6);
+        tl.fromTo("#cursor", { scale: 1 }, { scale: 0.6, duration: 0.3, ease: "power2.in", immediateRender: false }, 5.5);
+
+        /* ---------- Scene 3: DRUMKIT (5.90-8.50) ---------- */
+        tl.fromTo(".s3 .pads", { opacity: 0, scale: 1.08 }, { opacity: 1, scale: 1, duration: 0.28, ease: "power2.out" }, 5.95); // + card-shove-1 5.95
+        tl.fromTo("#skel3", { opacity: 0, x: -70, scale: 0.9 }, { opacity: 1, x: 0, scale: 1, duration: 0.4, ease: "power2.out" }, 5.95);
+        // kick on beat 6.28
+        tl.to("#padKick .p-flash", { opacity: 1, duration: 0.05 }, 6.28);
+        tl.to("#padKick .p-flash", { opacity: 0, duration: 0.3 }, 6.34);
+        tl.fromTo("#padKick", { scale: 1 }, { scale: 0.93, duration: 0.07 }, 6.28);
+        tl.to("#padKick", { scale: 1, duration: 0.16, ease: "back.out(2.5)" }, 6.36);
+        tl.fromTo("#kickLabel", { opacity: 0, scale: 1.35 }, { opacity: 1, scale: 1, duration: 0.14, ease: "back.out(2)" }, 6.42);
+        // snare on beat 7.35
+        tl.to("#padSnare .p-flash", { opacity: 1, duration: 0.05 }, 7.35);
+        tl.to("#padSnare .p-flash", { opacity: 0, duration: 0.3 }, 7.41);
+        tl.fromTo("#padSnare", { scale: 1 }, { scale: 0.93, duration: 0.07 }, 7.35);
+        tl.to("#padSnare", { scale: 1, duration: 0.16, ease: "back.out(2.5)" }, 7.43);
+        tl.fromTo("#snareLabel", { opacity: 0, scale: 1.35 }, { opacity: 1, scale: 1, duration: 0.14, ease: "back.out(2)" }, 7.5);
+
+        /* ---------- Scene 4: PIANO (8.50-11.10) ---------- */
+        tl.fromTo("#pianoBox", { opacity: 0, y: 60, scale: 0.96 }, { opacity: 1, y: 0, scale: 1, duration: 0.4, ease: "power2.out" }, 8.55); // + card-shove-2 8.55
+        tl.fromTo("#skel4", { opacity: 0, x: -60, scale: 0.92 }, { opacity: 1, x: 0, scale: 1, duration: 0.4, ease: "power2.out" }, 8.6);
+        // note C4 + key 1 glow (impactGlass_light_001 at 9.29)
+        tl.fromTo("#note1", { opacity: 0, y: 44 }, { opacity: 1, y: 0, duration: 0.16, ease: "power3.out" }, 9.29);
+        tl.to(".s4 .keys .key:nth-child(1) .k-glow", { opacity: 1, duration: 0.06 }, 9.29);
+        tl.to(".s4 .keys .key:nth-child(1) .k-glow", { opacity: 0, duration: 0.5 }, 9.36);
+        tl.to("#note1", { opacity: 0, duration: 0.4, ease: "power2.out" }, 9.62);
+        // note E4 + key 3 glow (impactGlass_light_002 at 9.83)
+        tl.fromTo("#note2", { opacity: 0, y: 44 }, { opacity: 1, y: 0, duration: 0.16, ease: "power3.out" }, 9.83);
+        tl.to(".s4 .keys .key:nth-child(3) .k-glow", { opacity: 1, duration: 0.06 }, 9.83);
+        tl.to(".s4 .keys .key:nth-child(3) .k-glow", { opacity: 0, duration: 0.5 }, 9.9);
+        tl.to("#note2", { opacity: 0, duration: 0.4, ease: "power2.out" }, 10.16);
+        // name slam (select_008 at 10.38)
+        tl.fromTo("#pianoName", { opacity: 0, scale: 1.25 }, { opacity: 1, scale: 1, duration: 0.24, ease: "back.out(2)" }, 10.38);
+
+        /* ---------- Scene 5: ORCHESTRA (11.10-14.10) ---------- */
+        tl.fromTo("#skelL", { opacity: 0, y: -50, scale: 0.94 }, { opacity: 1, y: 0, scale: 1, duration: 0.5, ease: "power2.out" }, 11.1);
+        tl.fromTo("#skelR", { opacity: 0, y: -50, scale: 0.94 }, { opacity: 1, y: 0, scale: 1, duration: 0.5, ease: "power2.out" }, 11.25);
+        // energy beam on beat 11.47
+        tl.fromTo("#beam", { opacity: 0, scaleX: 0 }, { opacity: 1, scaleX: 1, duration: 0.34, ease: "power3.out" }, 11.47);
+        tl.to("#beam", { opacity: 0.15, duration: 0.9, ease: "power2.out" }, 11.9);
+        // "GENERATIVE MUSIC." at 12.02 (impactGlass_light_003)
+        tl.fromTo("#orchA", { opacity: 0, scale: 1.2 }, { opacity: 1, scale: 1, duration: 0.22, ease: "power2.out" }, 12.02);
+        // "CONDUCTED BY YOU." beat-locked 12.56 (click_003)
+        tl.fromTo("#orchB", { opacity: 0, scale: 1.25, y: 24 }, { opacity: 1, scale: 1, y: 0, duration: 0.22, ease: "back.out(1.9)" }, 12.56);
+
+        /* ---------- Scene 6: RAPID FIRE (14.10-16.50) ---------- */
+        // swish draw (card-slide-1 at 14.2)
+        var swPath = Q("#swishPath");
+        var swLen = swPath.getTotalLength();
+        gsap.set(swPath, { strokeDasharray: swLen, strokeDashoffset: swLen });
+        tl.fromTo("#swish", { opacity: 0 }, { opacity: 1, duration: 0.1 }, 14.15);
+        tl.to(swPath, { strokeDashoffset: 0, duration: 1.1, ease: "power2.inOut" }, 14.2);
+        tl.fromTo("#paintLabel", { opacity: 0, scale: 1.25 }, { opacity: 1, scale: 1, duration: 0.22, ease: "back.out(2)" }, 14.73); // click_002 14.73
+        // ASL "A" (click_003 at 15.6)
+        tl.fromTo("#aslBig", { opacity: 0, scale: 0.5, rotate: -10 }, { opacity: 1, scale: 1, rotate: 0, duration: 0.22, ease: "back.out(2.2)" }, 14.9);
+        tl.fromTo("#aslLabel", { opacity: 0, scale: 1.25 }, { opacity: 1, scale: 1, duration: 0.22, ease: "back.out(2)" }, 15.6);
+
+        /* ---------- Scene 7: STATS (16.50-19.10) ---------- */
+        // stat cards slam on the 4-beat run 16.93/17.47/18.01/18.55
+        tl.fromTo("#stat1", { opacity: 0, y: 90 }, { opacity: 1, y: 0, duration: 0.18, ease: "power2.out" }, 16.93);
+        tl.fromTo("#stat2", { opacity: 0, y: 90 }, { opacity: 1, y: 0, duration: 0.18, ease: "power2.out" }, 17.47);
+        tl.fromTo("#stat3", { opacity: 0, y: 90 }, { opacity: 1, y: 0, duration: 0.18, ease: "power2.out" }, 18.01);
+        tl.fromTo("#stat4", { opacity: 0, y: 90 }, { opacity: 1, y: 0, duration: 0.18, ease: "power2.out" }, 18.55);
+        tl.fromTo("#stat1", { scale: 1 }, { scale: 1.04, duration: 0.1, yoyo: true, repeat: 1, immediateRender: false }, 16.93);
+        tl.fromTo("#stat2", { scale: 1 }, { scale: 1.04, duration: 0.1, yoyo: true, repeat: 1, immediateRender: false }, 17.47);
+        tl.fromTo("#stat3", { scale: 1 }, { scale: 1.04, duration: 0.1, yoyo: true, repeat: 1, immediateRender: false }, 18.01);
+        tl.fromTo("#stat4", { scale: 1 }, { scale: 1.04, duration: 0.1, yoyo: true, repeat: 1, immediateRender: false }, 18.55);
+
+        /* ---------- Scene 8: OUTRO (19.10-22.30) ---------- */
+        // logo slam on beat 19.64 (impactBell_heavy_000)
+        tl.fromTo("#logoHalo", { opacity: 0 }, { opacity: 0.9, duration: 0.5 }, 19.5);
+        tl.fromTo("#logo", { opacity: 0, scale: 1.45 }, { opacity: 1, scale: 1, duration: 0.3, ease: "back.out(1.8)" }, 19.64);
+        // tagline on strong cue 20.19
+        tl.fromTo("#tagline", { opacity: 0, y: 34 }, { opacity: 1, y: 0, duration: 0.28, ease: "power2.out" }, 20.19);
+        // URL chip on strong cue 20.74
+        tl.fromTo("#urlchip", { opacity: 0, y: 26, scale: 0.92 }, { opacity: 1, y: 0, scale: 1, duration: 0.24, ease: "power3.out" }, 20.74);
+        // exit blackout
+        tl.to("#logoHalo", { opacity: 0, duration: 0.2 }, 21.7);
+        tl.to("#blackout", { opacity: 1, duration: 0.25 }, 21.75);
+        tl.to(".fadeblack", { opacity: 1, duration: 0.4 }, 21.8);
+
+        /* ---------- Audio-reactive pulses (subtle) ---------- */
+        var gridfx = Q("#gridfx");
+        var halo = Q("#logoHalo .ring");
+        var ui = function (band, peak) {
+          var f = Math.min(1, Math.floor((tl.time() * 30) + 0.5));
+          if (!window.AUDIO_DATA || !window.AUDIO_DATA.bands || f >= window.AUDIO_DATA.bands.length) return;
+          var bands = window.AUDIO_DATA.bands[f];
+          if (!bands || !bands.length) return;
+          var bass = bands[Math.min(3, bands.length - 1)] / 255;
+          gridfx.style.opacity = String(Math.min(1, 0.18 + bass * 0.9));
+          var pk = 0;
+          for (var i = 0; i < Math.min(6, bands.length); i++) { if (bands[i] > pk) pk = bands[i]; }
+          pk = pk / 255;
+          halo.style.transform = "scale(" + String(1 + pk * 0.16) + ")";
+        };
+        var total = 22.3 * 30;
+        for (var f = 0; f <= total; f += 1) {
+          tl.call(ui, [f / 30, f / 30], null, f / 30);
+        }
+
+        window.__timelines = window.__timelines || {};
+        window.__timelines["main"] = tl;
+        tl.seek(0);
+      })();
+    </script>
+  </body>
+</html>

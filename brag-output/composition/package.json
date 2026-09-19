@@ -1,0 +1,13 @@
+{
+  "name": "airtouch-brag",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npx --yes hyperframes@0.8.48 preview",
+    "check": "npx --yes hyperframes@0.8.48 check",
+    "render": "npx --yes hyperframes@0.8.48 render"
+  },
+  "devDependencies": {
+    "hyperframes": "^0.8.48"
+  }
+}
